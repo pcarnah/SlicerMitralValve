@@ -2,8 +2,6 @@ cmake_minimum_required(VERSION 2.8.9)
 
 project(MVModeller)
 
-set(Slicer_DIR "F:/SlicerBuild/release/Slicer-build")
-
 #-----------------------------------------------------------------------------
 # Extension meta-information
 set(EXTENSION_HOMEPAGE "http://slicer.org/slicerWiki/index.php/Documentation/Nightly/Extensions/MVModeller")
@@ -13,6 +11,8 @@ set(EXTENSION_DESCRIPTION "This extension aids the process of modelling a mitral
 set(EXTENSION_ICONURL "http://www.example.com/Slicer/Extensions/MVModeller.png")
 set(EXTENSION_SCREENSHOTURLS "http://www.example.com/Slicer/Extensions/MVModeller/Screenshots/1.png")
 set(EXTENSION_DEPENDS "NA") # Specified as a space separated string, a list or 'NA' if any
+
+set(Slicer_DIR "F:\\SlicerBuild\\debug\\Slicer-build")
 
 #-----------------------------------------------------------------------------
 # Extension dependencies

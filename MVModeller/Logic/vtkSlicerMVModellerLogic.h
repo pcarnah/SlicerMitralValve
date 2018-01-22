@@ -34,6 +34,8 @@
 
 #include "vtkSlicerMVModellerModuleLogicExport.h"
 
+class vtkMRMLNode;
+class vtkMRMLMarkupsFiducialNode;
 
 /// \ingroup Slicer_QtModules_ExtensionTemplate
 class VTK_SLICER_MVMODELLER_MODULE_LOGIC_EXPORT vtkSlicerMVModellerLogic :
@@ -45,6 +47,10 @@ public:
   vtkTypeMacro(vtkSlicerMVModellerLogic, vtkSlicerModuleLogic);
   void PrintSelf(ostream& os, vtkIndent indent);
 
+  void drawMVOpening(vtkMRMLNode*);
+  void closeMVOpening(vtkMRMLNode*);
+  void generateOpeningPlanes();
+
 protected:
   vtkSlicerMVModellerLogic();
   virtual ~vtkSlicerMVModellerLogic();
@@ -55,10 +61,13 @@ protected:
   virtual void UpdateFromMRMLScene();
   virtual void OnMRMLSceneNodeAdded(vtkMRMLNode* node);
   virtual void OnMRMLSceneNodeRemoved(vtkMRMLNode* node);
+
+  void nodeToPolyCardinalSpline(vtkMRMLMarkupsFiducialNode* sourceNode);
 private:
 
   vtkSlicerMVModellerLogic(const vtkSlicerMVModellerLogic&); // Not implemented
   void operator=(const vtkSlicerMVModellerLogic&); // Not implemented
+
 };
 
 #endif

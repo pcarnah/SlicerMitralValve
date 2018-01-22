@@ -15,13 +15,13 @@
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
    <item>
-    <widget class="ctkCollapsibleButton" name="CTKCollapsibleButton" native="true">
-     <property name="text" stdset="0">
+    <widget class="ctkCollapsibleButton" name="CTKCollapsibleButton">
+     <property name="text">
       <string>Display</string>
      </property>
      <layout class="QVBoxLayout" name="verticalLayout_3">
       <item>
-       <widget class="qSlicerMVModellerFooBarWidget" name="FooBar" native="true"/>
+       <widget class="qSlicerMVModellerMVOpeningWidget" name="MVOpening" native="true"/>
       </item>
      </layout>
     </widget>
@@ -55,9 +55,9 @@
    <container>1</container>
   </customwidget>
   <customwidget>
-   <class>qSlicerMVModellerFooBarWidget</class>
+   <class>qSlicerMVModellerMVOpeningWidget</class>
    <extends>QWidget</extends>
-   <header>qSlicerMVModellerFooBarWidget.h</header>
+   <header>qSlicerMVModellerMVOpeningWidget.h</header>
    <container>1</container>
   </customwidget>
  </customwidgets>

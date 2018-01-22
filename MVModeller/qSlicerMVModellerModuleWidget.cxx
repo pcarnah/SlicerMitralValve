@@ -22,6 +22,11 @@
 #include "qSlicerMVModellerModuleWidget.h"
 #include "ui_qSlicerMVModellerModuleWidget.h"
 
+#include "vtkMRMLMarkupsFiducialNode.h"
+#include "vtkMRMLScene.h"
+
+#include "vtkSlicerMVModellerLogic.h"
+
 //-----------------------------------------------------------------------------
 /// \ingroup Slicer_QtModules_ExtensionTemplate
 class qSlicerMVModellerModuleWidgetPrivate: public Ui_qSlicerMVModellerModuleWidget
@@ -59,4 +64,24 @@ void qSlicerMVModellerModuleWidget::setup()
   Q_D(qSlicerMVModellerModuleWidget);
   d->setupUi(this);
   this->Superclass::setup();
+
+  d->MVOpening->setMRMLScene(this->mrmlScene());
+  connect(this, SIGNAL(mrmlSceneChanged(vtkMRMLScene*)), d->MVOpening, SLOT(setMRMLScene(vtkMRMLScene*)));
+
+  // Connections
+  connect(d->MVOpening, SIGNAL(closeMVOpening(vtkMRMLNode*)), this, SLOT(closeMVOpening(vtkMRMLNode*)));
+  connect(d->MVOpening, SIGNAL(drawMVOpening(vtkMRMLNode*)), this, SLOT(drawMVOpening(vtkMRMLNode*)));
+
+}
+
+//-----------------------------------------------------------------------------
+void qSlicerMVModellerModuleWidget::drawMVOpening(vtkMRMLNode * node)
+{
+    vtkSlicerMVModellerLogic::SafeDownCast(this->logic())->drawMVOpening(node);
+}
+
+//-----------------------------------------------------------------------------
+void qSlicerMVModellerModuleWidget::closeMVOpening(vtkMRMLNode * node)
+{
+    vtkSlicerMVModellerLogic::SafeDownCast(this->logic())->closeMVOpening(node);
 }
