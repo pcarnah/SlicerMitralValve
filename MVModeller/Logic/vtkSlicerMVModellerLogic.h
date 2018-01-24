@@ -50,6 +50,7 @@ public:
   void drawMVOpening(vtkMRMLNode*);
   void closeMVOpening(vtkMRMLNode*);
   void generateOpeningPlanes();
+  void selectMVPlane(const int&);
 
 protected:
   vtkSlicerMVModellerLogic();
@@ -62,7 +63,7 @@ protected:
   virtual void OnMRMLSceneNodeAdded(vtkMRMLNode* node);
   virtual void OnMRMLSceneNodeRemoved(vtkMRMLNode* node);
 
-  void nodeToPolyCardinalSpline(vtkMRMLMarkupsFiducialNode* sourceNode);
+  void nodeToPolyCardinalSpline(vtkMRMLMarkupsFiducialNode* sourceNode, const char* modelName = "PolySpline", bool closed = false);
 private:
 
   vtkSlicerMVModellerLogic(const vtkSlicerMVModellerLogic&); // Not implemented

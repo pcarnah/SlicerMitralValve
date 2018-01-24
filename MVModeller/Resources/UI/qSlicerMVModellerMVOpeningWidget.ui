@@ -15,7 +15,7 @@
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
    <item>
-    <widget class="ctkSliderWidget" name="sliderOpeningPlane" native="true">
+    <widget class="ctkSliderWidget" name="sliderOpeningPlane">
      <property name="sizePolicy">
       <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
        <horstretch>0</horstretch>
@@ -64,28 +64,28 @@
     </widget>
    </item>
    <item>
-    <widget class="qMRMLNodeComboBox" name="comboSourceSelector" native="true">
+    <widget class="qMRMLNodeComboBox" name="comboSourceSelector">
      <property name="enabled">
       <bool>true</bool>
      </property>
      <property name="toolTip">
       <string>Pick a Markups node listing fiducials.</string>
      </property>
-     <property name="nodeTypes" stdset="0">
+     <property name="nodeTypes">
       <stringlist>
        <string>vtkMRMLMarkupsFiducialNode</string>
       </stringlist>
      </property>
-     <property name="showChildNodeTypes" stdset="0">
+     <property name="showChildNodeTypes">
       <bool>false</bool>
      </property>
-     <property name="noneEnabled" stdset="0">
+     <property name="noneEnabled">
       <bool>true</bool>
      </property>
-     <property name="removeEnabled" stdset="0">
+     <property name="removeEnabled">
       <bool>false</bool>
      </property>
-     <property name="renameEnabled" stdset="0">
+     <property name="renameEnabled">
       <bool>true</bool>
      </property>
     </widget>
@@ -123,6 +123,35 @@
      </item>
     </layout>
    </item>
+   <item>
+    <spacer name="verticalSpacer_2">
+     <property name="orientation">
+      <enum>Qt::Vertical</enum>
+     </property>
+     <property name="sizeType">
+      <enum>QSizePolicy::Minimum</enum>
+     </property>
+     <property name="sizeHint" stdset="0">
+      <size>
+       <width>20</width>
+       <height>40</height>
+      </size>
+     </property>
+    </spacer>
+   </item>
+   <item>
+    <widget class="qMRMLSliderWidget" name="sliderSelectPlane">
+     <property name="decimals">
+      <number>0</number>
+     </property>
+     <property name="minimum">
+      <double>1.000000000000000</double>
+     </property>
+     <property name="maximum">
+      <double>11.000000000000000</double>
+     </property>
+    </widget>
+   </item>
   </layout>
  </widget>
  <customwidgets>
@@ -130,6 +159,11 @@
    <class>qMRMLNodeComboBox</class>
    <extends>QWidget</extends>
    <header>qMRMLNodeComboBox.h</header>
+  </customwidget>
+  <customwidget>
+   <class>qMRMLSliderWidget</class>
+   <extends>ctkSliderWidget</extends>
+   <header>qMRMLSliderWidget.h</header>
   </customwidget>
   <customwidget>
    <class>ctkSliderWidget</class>

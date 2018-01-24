@@ -71,7 +71,7 @@ void qSlicerMVModellerModuleWidget::setup()
   // Connections
   connect(d->MVOpening, SIGNAL(closeMVOpening(vtkMRMLNode*)), this, SLOT(closeMVOpening(vtkMRMLNode*)));
   connect(d->MVOpening, SIGNAL(drawMVOpening(vtkMRMLNode*)), this, SLOT(drawMVOpening(vtkMRMLNode*)));
-
+  connect(d->MVOpening, SIGNAL(selectMVPlane(int)), this, SLOT(selectMVPlane(int)));
 }
 
 //-----------------------------------------------------------------------------
@@ -84,4 +84,10 @@ void qSlicerMVModellerModuleWidget::drawMVOpening(vtkMRMLNode * node)
 void qSlicerMVModellerModuleWidget::closeMVOpening(vtkMRMLNode * node)
 {
     vtkSlicerMVModellerLogic::SafeDownCast(this->logic())->closeMVOpening(node);
+}
+
+//-----------------------------------------------------------------------------
+void qSlicerMVModellerModuleWidget::selectMVPlane(const int & i)
+{
+	vtkSlicerMVModellerLogic::SafeDownCast(this->logic())->selectMVPlane(i);
 }

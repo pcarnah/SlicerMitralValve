@@ -43,6 +43,7 @@ public:
 public slots:
   void drawMVOpening(vtkMRMLNode*);
   void closeMVOpening(vtkMRMLNode*);
+  void selectMVPlane(const int &);
 
 protected:
   QScopedPointer<qSlicerMVModellerModuleWidgetPrivate> d_ptr;
