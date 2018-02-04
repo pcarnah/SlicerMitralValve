@@ -29,6 +29,9 @@
 
 // MRML includes
 
+// VTK Includes
+#include <vtkSmartPointer.h>
+
 // STD includes
 #include <cstdlib>
 
@@ -36,6 +39,8 @@
 
 class vtkMRMLNode;
 class vtkMRMLMarkupsFiducialNode;
+class vtkCollection;
+class vtkPolyData;
 
 /// \ingroup Slicer_QtModules_ExtensionTemplate
 class VTK_SLICER_MVMODELLER_MODULE_LOGIC_EXPORT vtkSlicerMVModellerLogic :
@@ -63,11 +68,14 @@ protected:
   virtual void OnMRMLSceneNodeAdded(vtkMRMLNode* node);
   virtual void OnMRMLSceneNodeRemoved(vtkMRMLNode* node);
 
-  void nodeToPolyCardinalSpline(vtkMRMLMarkupsFiducialNode* sourceNode, const char* modelName = "PolySpline", bool closed = false);
+  vtkSmartPointer<vtkPolyData> nodeToPolyCardinalSpline(vtkMRMLMarkupsFiducialNode* sourceNode, bool closed = false);
 private:
 
   vtkSlicerMVModellerLogic(const vtkSlicerMVModellerLogic&); // Not implemented
   void operator=(const vtkSlicerMVModellerLogic&); // Not implemented
+
+  vtkSmartPointer<vtkCollection> planes;
+  vtkSmartPointer<vtkPolyData> profile;
 
 };
 
