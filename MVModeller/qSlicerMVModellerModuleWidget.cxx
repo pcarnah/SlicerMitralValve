@@ -68,10 +68,15 @@ void qSlicerMVModellerModuleWidget::setup()
   d->MVOpening->setMRMLScene(this->mrmlScene());
   connect(this, SIGNAL(mrmlSceneChanged(vtkMRMLScene*)), d->MVOpening, SLOT(setMRMLScene(vtkMRMLScene*)));
 
+  d->PlaneStepWidget->setMRMLScene(this->mrmlScene());
+  connect(this, SIGNAL(mrmlSceneChanged(vtkMRMLScene*)), d->PlaneStepWidget, SLOT(setMRMLScene(vtkMRMLScene*)));
+
   // Connections
   connect(d->MVOpening, SIGNAL(closeMVOpening(vtkMRMLNode*)), this, SLOT(closeMVOpening(vtkMRMLNode*)));
   connect(d->MVOpening, SIGNAL(drawMVOpening(vtkMRMLNode*)), this, SLOT(drawMVOpening(vtkMRMLNode*)));
-  connect(d->MVOpening, SIGNAL(selectMVPlane(int)), this, SLOT(selectMVPlane(int)));
+  connect(d->PlaneStepWidget, SIGNAL(selectMVPlane(int)), this, SLOT(selectMVPlane(int)));
+  connect(d->PlaneStepWidget, SIGNAL(beginDrawPlane()), this, SLOT(drawPlaneProfile()));
+  connect(d->PlaneStepWidget, SIGNAL(endDrawPlane(int)), this, SLOT(endPlaneProfile(int)));
 }
 
 //-----------------------------------------------------------------------------
@@ -89,5 +94,17 @@ void qSlicerMVModellerModuleWidget::closeMVOpening(vtkMRMLNode * node)
 //-----------------------------------------------------------------------------
 void qSlicerMVModellerModuleWidget::selectMVPlane(const int & i)
 {
-	vtkSlicerMVModellerLogic::SafeDownCast(this->logic())->selectMVPlane(i);
+    vtkSlicerMVModellerLogic::SafeDownCast(this->logic())->selectMVPlane(i);
+}
+
+//-----------------------------------------------------------------------------
+void qSlicerMVModellerModuleWidget::drawPlaneProfile()
+{
+    vtkSlicerMVModellerLogic::SafeDownCast(this->logic())->beginDrawPlaneSpline();
+}
+
+//-----------------------------------------------------------------------------
+void qSlicerMVModellerModuleWidget::endPlaneProfile(const int &i)
+{
+    vtkSlicerMVModellerLogic::SafeDownCast(this->logic())->closePlaneSpline(i);
 }

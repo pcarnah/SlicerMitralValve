@@ -58,8 +58,6 @@ qSlicerMVModellerMVOpeningWidget
 
     d->comboSourceSelector->setMRMLScene(this->mrmlScene());
     connect(this, SIGNAL(mrmlSceneChanged(vtkMRMLScene*)), d->comboSourceSelector, SLOT(setMRMLScene(vtkMRMLScene*)));
-
-    //connect(d->sliderSelectPlane, SIGNAL(valueChanged(double)), this, SLOT(on_sliderSelectPlane_changed(double)));
 }
 
 //-----------------------------------------------------------------------------
@@ -96,10 +94,3 @@ void qSlicerMVModellerMVOpeningWidget::on_buttonConfirmOpening_clicked()
     emit closeMVOpening(d->comboSourceSelector->currentNode());
 }
 
-// --------------------------------------------------------------------------
-void qSlicerMVModellerMVOpeningWidget::on_sliderSelectPlane_valueChanged(double i)
-{
-    int index = static_cast<int>(i) - 1;
-
-    emit selectMVPlane(index);
-}

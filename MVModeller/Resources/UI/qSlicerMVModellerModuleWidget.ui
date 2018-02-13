@@ -15,13 +15,25 @@
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
    <item>
-    <widget class="ctkCollapsibleButton" name="CTKCollapsibleButton">
-     <property name="text">
+    <widget class="ctkCollapsibleButton" name="CTKCollapsibleButton" native="true">
+     <property name="text" stdset="0">
       <string>Display</string>
      </property>
      <layout class="QVBoxLayout" name="verticalLayout_3">
       <item>
        <widget class="qSlicerMVModellerMVOpeningWidget" name="MVOpening" native="true"/>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="ctkCollapsibleButton" name="PlaneStepCollapsibleButton" native="true">
+     <property name="text" stdset="0">
+      <string>Draw Valve Leaflets</string>
+     </property>
+     <layout class="QVBoxLayout" name="verticalLayout_2">
+      <item>
+       <widget class="qSlicerMVModellerPlaneStepWidget" name="PlaneStepWidget" native="true"/>
       </item>
      </layout>
     </widget>
@@ -58,6 +70,12 @@
    <class>qSlicerMVModellerMVOpeningWidget</class>
    <extends>QWidget</extends>
    <header>qSlicerMVModellerMVOpeningWidget.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>qSlicerMVModellerPlaneStepWidget</class>
+   <extends>QWidget</extends>
+   <header>qSlicerMVModellerPlaneStepWidget.h</header>
    <container>1</container>
   </customwidget>
  </customwidgets>

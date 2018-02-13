@@ -15,7 +15,7 @@
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
    <item>
-    <widget class="ctkSliderWidget" name="sliderOpeningPlane">
+    <widget class="ctkSliderWidget" name="sliderOpeningPlane" native="true">
      <property name="sizePolicy">
       <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
        <horstretch>0</horstretch>
@@ -64,28 +64,28 @@
     </widget>
    </item>
    <item>
-    <widget class="qMRMLNodeComboBox" name="comboSourceSelector">
+    <widget class="qMRMLNodeComboBox" name="comboSourceSelector" native="true">
      <property name="enabled">
       <bool>true</bool>
      </property>
      <property name="toolTip">
       <string>Pick a Markups node listing fiducials.</string>
      </property>
-     <property name="nodeTypes">
+     <property name="nodeTypes" stdset="0">
       <stringlist>
        <string>vtkMRMLMarkupsFiducialNode</string>
       </stringlist>
      </property>
-     <property name="showChildNodeTypes">
+     <property name="showChildNodeTypes" stdset="0">
       <bool>false</bool>
      </property>
-     <property name="noneEnabled">
+     <property name="noneEnabled" stdset="0">
       <bool>true</bool>
      </property>
-     <property name="removeEnabled">
+     <property name="removeEnabled" stdset="0">
       <bool>false</bool>
      </property>
-     <property name="renameEnabled">
+     <property name="renameEnabled" stdset="0">
       <bool>true</bool>
      </property>
     </widget>
@@ -139,19 +139,6 @@
      </property>
     </spacer>
    </item>
-   <item>
-    <widget class="qMRMLSliderWidget" name="sliderSelectPlane">
-     <property name="decimals">
-      <number>0</number>
-     </property>
-     <property name="minimum">
-      <double>1.000000000000000</double>
-     </property>
-     <property name="maximum">
-      <double>11.000000000000000</double>
-     </property>
-    </widget>
-   </item>
   </layout>
  </widget>
  <customwidgets>
@@ -159,11 +146,6 @@
    <class>qMRMLNodeComboBox</class>
    <extends>QWidget</extends>
    <header>qMRMLNodeComboBox.h</header>
-  </customwidget>
-  <customwidget>
-   <class>qMRMLSliderWidget</class>
-   <extends>ctkSliderWidget</extends>
-   <header>qMRMLSliderWidget.h</header>
   </customwidget>
   <customwidget>
    <class>ctkSliderWidget</class>

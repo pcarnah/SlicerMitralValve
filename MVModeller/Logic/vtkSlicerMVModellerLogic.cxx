@@ -54,6 +54,12 @@
 #include <vtkImageReslice.h>
 #include <vtkImageData.h>
 #include <vtkImageMapper.h>
+#include <vtkMarchingContourFilter.h>
+#include <vtkAppendPolyData.h>
+#include <vtkSurfaceReconstructionFilter.h>
+#include <vtkDelaunay3D.h>
+#include <vtkUnstructuredGrid.h>
+#include <vtkUnstructuredGridVolumeMapper.h>
 
 // STD includes
 #include <cassert>
@@ -67,7 +73,13 @@ vtkStandardNewMacro(vtkSlicerMVModellerLogic);
 vtkSlicerMVModellerLogic::vtkSlicerMVModellerLogic()
 {
     profile = 0;
+    fidNode = 0;
     planes = vtkSmartPointer<vtkCollection>::New();
+    leafletSplines = vtkSmartPointer<vtkCollection>::New();
+    for(int i = 0; i < 12; i++)
+    {
+        leafletSplines->AddItem(vtkSmartPointer<vtkPolyData>::New());
+    }
 }
 
 //----------------------------------------------------------------------------
@@ -368,11 +380,6 @@ void vtkSlicerMVModellerLogic::generateOpeningPlanes()
             displayNodePlane->FrontfaceCullingOff();
             displayNodePlane->SliceIntersectionVisibilityOn();
             displayNodePlane->SetOpacity(0.6);
-
-            if( i != 0 && i != 5 && i && 10 )
-            {
-                displayNodePlane->VisibilityOff();
-            }
         }
 
         planes->AddItem(planeSource.GetPointer());
@@ -408,4 +415,138 @@ void vtkSlicerMVModellerLogic::selectMVPlane(const int & i)
         vtkDebugMacro("Plane#: " << i << " N:" << N[0] << "," << N[1] << "," << N[2] << " P:" << P[0] << "," << P[1] << "," << P[2]);
         yellowSlice->SetSliceToRASByNTP(N[0], N[1], N[2], T[0] , T[1] , T[2], P[0], P[1], P[2], 0);
     }
+}
+
+//---------------------------------------------------------------------------
+void vtkSlicerMVModellerLogic::beginDrawPlaneSpline()
+{
+    vtkMRMLApplicationLogic *mrmlAppLogic = this->GetMRMLApplicationLogic();
+    vtkMRMLInteractionNode *inode = mrmlAppLogic->GetInteractionNode();
+    vtkMRMLSelectionNode *snode = mrmlAppLogic->GetSelectionNode();
+
+    snode->SetReferenceActivePlaceNodeClassName("vtkMRMLMarkupsFiducialNode");
+
+    if( !fidNode )
+    {
+        fidNode = vtkSmartPointer<vtkMRMLMarkupsFiducialNode>::New();
+        fidNode->SetName("P");
+        fidNode->SetScene(this->GetMRMLScene());
+
+        this->GetMRMLScene()->AddNode(fidNode);
+    }
+    else
+    {
+        fidNode->RemoveAllMarkups();
+
+        if( fidNode->GetScene() == NULL )
+        {
+            fidNode->SetScene(this->GetMRMLScene());
+
+            this->GetMRMLScene()->AddNode(fidNode);
+        }
+    }
+
+    snode->SetReferenceActivePlaceNodeID(fidNode->GetID());
+
+    inode->SwitchToPersistentPlaceMode();
+    inode->SetCurrentInteractionMode(vtkMRMLInteractionNode::Place);
+}
+
+//---------------------------------------------------------------------------
+void vtkSlicerMVModellerLogic::closePlaneSpline(int i)
+{
+    if( !fidNode )
+    {
+        return;
+    }
+
+    vtkMRMLApplicationLogic *mrmlAppLogic = this->GetMRMLApplicationLogic();
+    vtkMRMLInteractionNode *inode = mrmlAppLogic->GetInteractionNode();
+    vtkMRMLSelectionNode *snode = mrmlAppLogic->GetSelectionNode();
+
+    inode->SwitchToViewTransformMode();
+    inode->SwitchToSinglePlaceMode();
+    inode->SetCurrentInteractionMode(vtkMRMLInteractionNode::ViewTransform);
+
+    vtkSmartPointer<vtkPolyData> poly = nodeToPolyCardinalSpline( fidNode, false );
+
+    vtkNew<vtkMRMLModelNode> model;
+    model->SetName("MVLeafletSpline");
+
+    this->GetMRMLScene()->AddNode(model.GetPointer());
+    model->SetScene(this->GetMRMLScene());
+    vtkDebugMacro("Added model node");
+
+    model->CreateDefaultDisplayNodes();
+
+    model->SetAndObservePolyData(poly);
+    model->Modified();
+
+    vtkMRMLDisplayNode* displayNode = model->GetDisplayNode();
+    if (displayNode)
+    {
+        displayNode->SetActiveScalarName("Curvature");
+        displayNode->SliceIntersectionVisibilityOn();
+        displayNode->SetLineWidth(2);
+    }
+    else
+    {
+        vtkWarningMacro("Couldn't get display node");
+    }
+
+    if( i < leafletSplines->GetNumberOfItems() )
+    {
+        leafletSplines->ReplaceItem(i, poly);
+    }
+
+    fidNode->RemoveAllMarkups();
+}
+
+//---------------------------------------------------------------------------
+void vtkSlicerMVModellerLogic::generateSurface()
+{
+    vtkNew<vtkAppendPolyData> append;
+    for(int i = 0; i < leafletSplines->GetNumberOfItems(); i++)
+    {
+        vtkSmartPointer<vtkPolyData> poly = vtkPolyData::SafeDownCast(leafletSplines->GetItemAsObject(i));
+        append->AddInputData(poly);
+    }
+    append->Update();
+
+    vtkSmartPointer<vtkPolyData> surface = interpolateMesh(append->GetOutput());
+
+    vtkNew<vtkMRMLModelNode> model;
+    model->SetName("MVSurface");
+
+    this->GetMRMLScene()->AddNode(model.GetPointer());
+    model->SetScene(this->GetMRMLScene());
+    vtkDebugMacro("Added model node");
+
+    model->CreateDefaultDisplayNodes();
+
+    model->SetAndObservePolyData(surface);
+    model->Modified();
+
+    vtkMRMLDisplayNode* displayNode = model->GetDisplayNode();
+    if (displayNode)
+    {
+        displayNode->SetActiveScalarName("Curvature");
+        displayNode->SliceIntersectionVisibilityOn();
+        displayNode->SetLineWidth(2);
+    }
+    else
+    {
+        vtkWarningMacro("Couldn't get display node");
+    }
+}
+
+//---------------------------------------------------------------------------
+vtkSmartPointer<vtkPolyData> vtkSlicerMVModellerLogic::interpolateMesh(vtkPolyData *points)
+{
+    vtkSmartPointer<vtkMarchingContourFilter> filter = vtkSmartPointer<vtkMarchingContourFilter>::New();
+    filter->SetInputData(points);
+    filter->GenerateValues(1, 0, 1);
+    filter->Update();
+
+    return filter->GetOutput();
 }

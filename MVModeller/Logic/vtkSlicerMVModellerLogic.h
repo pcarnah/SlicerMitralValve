@@ -41,6 +41,7 @@ class vtkMRMLNode;
 class vtkMRMLMarkupsFiducialNode;
 class vtkCollection;
 class vtkPolyData;
+class vtkPointSet;
 
 /// \ingroup Slicer_QtModules_ExtensionTemplate
 class VTK_SLICER_MVMODELLER_MODULE_LOGIC_EXPORT vtkSlicerMVModellerLogic :
@@ -56,6 +57,9 @@ public:
   void closeMVOpening(vtkMRMLNode*);
   void generateOpeningPlanes();
   void selectMVPlane(const int&);
+  void beginDrawPlaneSpline();
+  void closePlaneSpline(int i);
+  void generateSurface();
 
 protected:
   vtkSlicerMVModellerLogic();
@@ -69,13 +73,16 @@ protected:
   virtual void OnMRMLSceneNodeRemoved(vtkMRMLNode* node);
 
   vtkSmartPointer<vtkPolyData> nodeToPolyCardinalSpline(vtkMRMLMarkupsFiducialNode* sourceNode, bool closed = false);
+  vtkSmartPointer<vtkPolyData> interpolateMesh(vtkPolyData *points);
 private:
 
   vtkSlicerMVModellerLogic(const vtkSlicerMVModellerLogic&); // Not implemented
   void operator=(const vtkSlicerMVModellerLogic&); // Not implemented
 
   vtkSmartPointer<vtkCollection> planes;
+  vtkSmartPointer<vtkCollection> leafletSplines;
   vtkSmartPointer<vtkPolyData> profile;
+  vtkSmartPointer<vtkMRMLMarkupsFiducialNode> fidNode;
 
 };
 

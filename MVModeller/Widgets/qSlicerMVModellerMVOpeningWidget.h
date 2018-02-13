@@ -30,12 +30,10 @@ public slots:
     virtual void setMRMLScene(vtkMRMLScene* newScene) override;
     void on_buttonBeginOpening_clicked();
     void on_buttonConfirmOpening_clicked();
-	void on_sliderSelectPlane_valueChanged(double);
 
 signals:
     void drawMVOpening(vtkMRMLNode*);
     void closeMVOpening(vtkMRMLNode*);
-    void selectMVPlane(const int& i);
 
 protected slots:
 
