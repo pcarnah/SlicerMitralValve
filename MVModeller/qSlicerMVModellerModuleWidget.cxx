@@ -77,6 +77,7 @@ void qSlicerMVModellerModuleWidget::setup()
   connect(d->PlaneStepWidget, SIGNAL(selectMVPlane(int)), this, SLOT(selectMVPlane(int)));
   connect(d->PlaneStepWidget, SIGNAL(beginDrawPlane()), this, SLOT(drawPlaneProfile()));
   connect(d->PlaneStepWidget, SIGNAL(endDrawPlane(int)), this, SLOT(endPlaneProfile(int)));
+  connect(d->PlaneStepWidget, SIGNAL(generateSurface()), this, SLOT(generateSurface()));
 }
 
 //-----------------------------------------------------------------------------
@@ -107,4 +108,10 @@ void qSlicerMVModellerModuleWidget::drawPlaneProfile()
 void qSlicerMVModellerModuleWidget::endPlaneProfile(const int &i)
 {
     vtkSlicerMVModellerLogic::SafeDownCast(this->logic())->closePlaneSpline(i);
+}
+
+//-----------------------------------------------------------------------------
+void qSlicerMVModellerModuleWidget::generateSurface()
+{
+    vtkSlicerMVModellerLogic::SafeDownCast(this->logic())->generateSurface();
 }

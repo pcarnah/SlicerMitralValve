@@ -32,38 +32,48 @@
 #include <vtkMRMLScalarVolumeNode.h>
 
 // VTK includes
-#include <vtkIntArray.h>
 #include <vtkNew.h>
-#include <vtkObjectFactory.h>
 #include <vtkPlane.h>
 #include <vtkPlaneSource.h>
 #include <vtkCardinalSpline.h>
 #include <vtkPoints.h>
 #include <vtkCellArray.h>
 #include <vtkPolyData.h>
-#include <vtkTubeFilter.h>
-#include <vtkPolyDataAlgorithm.h>
-#include <vtkPlaneSource.h>
 #include <vtkMath.h>
 #include <vtkTransform.h>
 #include <vtkIdList.h>
 #include <vtkMatrix4x4.h>
-#include <vtkPolyDataMapper.h>
-#include <vtkActor.h>
 #include <vtkCollection.h>
-#include <vtkImageReslice.h>
-#include <vtkImageData.h>
-#include <vtkImageMapper.h>
-#include <vtkMarchingContourFilter.h>
+#include <vtkContourFilter.h>
 #include <vtkAppendPolyData.h>
 #include <vtkSurfaceReconstructionFilter.h>
 #include <vtkDelaunay3D.h>
+#include <vtkDelaunay2D.h>
 #include <vtkUnstructuredGrid.h>
-#include <vtkUnstructuredGridVolumeMapper.h>
+#include <vtkLineSource.h>
+#include <vtkImageDataGeometryFilter.h>
+#include <vtkSplineFilter.h>
+#include <vtkKdTree.h>
+#include <vtkIdTypeArray.h>
+#include <vtkPolyDataNormals.h>
+#include <vtkDataSetSurfaceFilter.h>
+#include <vtkCleanPolyData.h>
+#include <vtkTriangleFilter.h>
+#include <vtkWedge.h>
+#include <vtkButterflySubdivisionFilter.h>
+
+// vtkITK includes
+#include <vtkITKMorphologicalContourInterpolator.h>
 
 // STD includes
 #include <cassert>
 #include <cmath>
+#include <array>
+
+//polypartition includes
+#include "polypartition.h"
+
+using namespace std;
 
 
 //----------------------------------------------------------------------------
@@ -76,7 +86,7 @@ vtkSlicerMVModellerLogic::vtkSlicerMVModellerLogic()
     fidNode = 0;
     planes = vtkSmartPointer<vtkCollection>::New();
     leafletSplines = vtkSmartPointer<vtkCollection>::New();
-    for(int i = 0; i < 12; i++)
+    for(int i = 0; i < 11; i++)
     {
         leafletSplines->AddItem(vtkSmartPointer<vtkPolyData>::New());
     }
@@ -193,7 +203,7 @@ void vtkSlicerMVModellerLogic::closeMVOpening(vtkMRMLNode * node)
 }
 
 //---------------------------------------------------------------------------
-vtkSmartPointer<vtkPolyData> vtkSlicerMVModellerLogic::nodeToPolyCardinalSpline(vtkMRMLMarkupsFiducialNode* sourceNode, bool closed)
+vtkSmartPointer<vtkPolyData> vtkSlicerMVModellerLogic::nodeToPolyCardinalSpline(vtkMRMLMarkupsFiducialNode* sourceNode, bool closed, int nSubs)
 {
     vtkSmartPointer<vtkPolyData> outputPoly = vtkSmartPointer<vtkPolyData>::New();
     if (!sourceNode)
@@ -202,52 +212,43 @@ vtkSmartPointer<vtkPolyData> vtkSlicerMVModellerLogic::nodeToPolyCardinalSpline(
         return outputPoly;
     }
 
-    //Get number of control points and initialize vectors
-    int nCtrlPoints = sourceNode->GetNumberOfFiducials();
-    double pos[3] = { 0, 0, 0 };
-
-    vtkNew<vtkCardinalSpline> aSplineX;
-    vtkNew<vtkCardinalSpline> aSplineY;
-    vtkNew<vtkCardinalSpline> aSplineZ;
-
-    if (closed)
+    if( closed )
     {
+        //Get number of control points and initialize vectors
+        int nCtrlPoints = sourceNode->GetNumberOfFiducials();
+        double pos[3] = { 0, 0, 0 };
+
+        vtkNew<vtkCardinalSpline> aSplineX;
+        vtkNew<vtkCardinalSpline> aSplineY;
+        vtkNew<vtkCardinalSpline> aSplineZ;
+
         aSplineX->ClosedOn();
         aSplineY->ClosedOn();
         aSplineZ->ClosedOn();
-    }
-    else
-    {
-        aSplineX->ClosedOff();
-        aSplineY->ClosedOff();
-        aSplineZ->ClosedOff();
-    }
+
+        //Add control points and calculate centroid
+        for (int i = 0; i < nCtrlPoints; i++)
+        {
+            sourceNode->GetNthFiducialPosition(i, pos);
+
+            aSplineX->AddPoint(i, pos[0]);
+            aSplineY->AddPoint(i, pos[1]);
+            aSplineZ->AddPoint(i, pos[2]);
+        }
+
+        //    Interpolate x, y and z by using the three spline filters and create new points
+        int nInterpolatedPoints = 52 * (nCtrlPoints - 1);
+        vtkNew<vtkPoints> points;
+
+        double r[2] = { 0, 0 };
+        aSplineX->GetParametricRange(r);
+
+        double t = r[0];
+        int p = 0;
+        double tStep = (static_cast<double>(nCtrlPoints)-1) / (static_cast<double>(nInterpolatedPoints)-1);
+        int nOutputPoints = 0;
 
 
-    //Add control points and calculate centroid
-    for (int i = 0; i < nCtrlPoints; i++)
-    {
-        sourceNode->GetNthFiducialPosition(i, pos);
-
-        aSplineX->AddPoint(i, pos[0]);
-        aSplineY->AddPoint(i, pos[1]);
-        aSplineZ->AddPoint(i, pos[2]);
-    }
-
-    //    Interpolate x, y and z by using the three spline filters and create new points
-    int nInterpolatedPoints = 52 * (nCtrlPoints - 1);
-    vtkNew<vtkPoints> points;
-
-    double r[2] = {0,0};
-    aSplineX->GetParametricRange(r);
-
-    double t = r[0];
-    int p = 0;
-    double tStep = (static_cast<double>(nCtrlPoints) - 1) / (static_cast<double>(nInterpolatedPoints) - 1);
-    int nOutputPoints = 0;
-
-    if (closed)
-    {
         while (t < r[1] + 1.0)
         {
             points->InsertPoint(p, aSplineX->Evaluate(t), aSplineY->Evaluate(t), aSplineZ->Evaluate(t));
@@ -257,33 +258,58 @@ vtkSmartPointer<vtkPolyData> vtkSlicerMVModellerLogic::nodeToPolyCardinalSpline(
         points->InsertPoint(p, aSplineX->Evaluate(r[0]), aSplineY->Evaluate(r[0]), aSplineZ->Evaluate(r[0]));
         p = p + 1;
         points->InsertPoint(p, aSplineX->Evaluate(r[0] + tStep), aSplineY->Evaluate(r[0] + tStep), aSplineZ->Evaluate(r[0] + tStep));
+
+
+
+        nOutputPoints = p;
+
+
+        //Create model defining mv opening
+        vtkNew<vtkCellArray> lines;
+        lines->InsertNextCell(nOutputPoints);
+        for (int i = 0; i < nOutputPoints; i++)
+        {
+            lines->InsertCellPoint(i);
+        }
+
+        outputPoly->SetPoints(points.GetPointer());
+        outputPoly->SetLines(lines.GetPointer());
     }
     else
     {
-        while (t < r[1])
+        vtkSmartPointer<vtkPolyData> inputPoly = vtkSmartPointer<vtkPolyData>::New();
+
+        //Get number of control points and initialize vectors
+        int nCtrlPoints = sourceNode->GetNumberOfFiducials();
+        double pos[3] = { 0, 0, 0 };
+
+        vtkNew<vtkPoints> points;
+        vtkNew<vtkCellArray> lines;
+        lines->InsertNextCell(nCtrlPoints);
+        for (int i = 0; i < nCtrlPoints; i++)
         {
-            points->InsertPoint(p, aSplineX->Evaluate(t), aSplineY->Evaluate(t), aSplineZ->Evaluate(t));
-            t = t + tStep;
-            p++;
+            sourceNode->GetNthFiducialPosition(i, pos);
+
+            points->InsertPoint(i, pos);
+            lines->InsertCellPoint(i);
         }
+
+        inputPoly->SetPoints(points.GetPointer());
+        inputPoly->SetLines(lines.GetPointer());
+
+        vtkNew<vtkSplineFilter> spline;
+        spline->SetInputData(inputPoly);
+        spline->SetSubdivideToSpecified();
+        spline->SetNumberOfSubdivisions(nSubs);
+        spline->GetSpline()->ClosedOff();
+        spline->Update();
+
+        outputPoly->DeepCopy(spline->GetOutput());
     }
-
-    nOutputPoints = p;
-
-
-    //Create model defining mv opening
-    vtkNew<vtkCellArray> lines;
-    lines->InsertNextCell(nOutputPoints);
-    for(int i = 0; i < nOutputPoints; i++)
-    {
-        lines->InsertCellPoint(i);
-    }
-
-    outputPoly->SetPoints(points.GetPointer());
-    outputPoly->SetLines(lines.GetPointer());
 
     return outputPoly;
 }
+
 
 //---------------------------------------------------------------------------
 void vtkSlicerMVModellerLogic::generateOpeningPlanes()
@@ -380,6 +406,7 @@ void vtkSlicerMVModellerLogic::generateOpeningPlanes()
             displayNodePlane->FrontfaceCullingOff();
             displayNodePlane->SliceIntersectionVisibilityOn();
             displayNodePlane->SetOpacity(0.6);
+            displayNodePlane->VisibilityOff();
         }
 
         planes->AddItem(planeSource.GetPointer());
@@ -453,7 +480,7 @@ void vtkSlicerMVModellerLogic::beginDrawPlaneSpline()
 }
 
 //---------------------------------------------------------------------------
-void vtkSlicerMVModellerLogic::closePlaneSpline(int i)
+void vtkSlicerMVModellerLogic::closePlaneSpline(int planeNum)
 {
     if( !fidNode )
     {
@@ -468,7 +495,41 @@ void vtkSlicerMVModellerLogic::closePlaneSpline(int i)
     inode->SwitchToSinglePlaceMode();
     inode->SetCurrentInteractionMode(vtkMRMLInteractionNode::ViewTransform);
 
-    vtkSmartPointer<vtkPolyData> poly = nodeToPolyCardinalSpline( fidNode, false );
+    vtkSmartPointer<vtkPolyData> poly = nodeToPolyCardinalSpline( fidNode, false, LEAFLET_SPLINE_SUBDIVISIONS );
+
+    vtkSmartPointer<vtkPoints> points = vtkSmartPointer<vtkPoints>::New();
+    points->DeepCopy(poly->GetPoints());
+    vtkSmartPointer<vtkCellArray> lines = vtkSmartPointer<vtkCellArray>::New();
+
+    double p1[3], p2[3], p3[3];
+    points->GetPoint(0, p1);
+    points->GetPoint(points->GetNumberOfPoints() - 1, p2);
+
+    double x,y,z;
+    if( p1[2] < p2[2] )
+    {
+        swap(p1, p2);
+    }
+
+    p3[0] = p1[0];
+    p3[1] = p1[1];
+    p3[2] = p2[2];
+
+    vtkNew<vtkLineSource> line1, line2;
+    line1->SetPoint1(p1);
+    line1->SetPoint2(p3);
+    line1->SetResolution(25);
+
+    line2->SetPoint1(p3);
+    line2->SetPoint2(p2);
+    line2->SetResolution(25);
+
+    vtkNew<vtkAppendPolyData> append;
+    append->AddInputData(poly);
+    append->AddInputConnection(line1->GetOutputPort());
+    append->AddInputConnection(line2->GetOutputPort());
+    append->Update();
+
 
     vtkNew<vtkMRMLModelNode> model;
     model->SetName("MVLeafletSpline");
@@ -479,7 +540,7 @@ void vtkSlicerMVModellerLogic::closePlaneSpline(int i)
 
     model->CreateDefaultDisplayNodes();
 
-    model->SetAndObservePolyData(poly);
+    model->SetAndObservePolyData(append->GetOutput());
     model->Modified();
 
     vtkMRMLDisplayNode* displayNode = model->GetDisplayNode();
@@ -494,9 +555,9 @@ void vtkSlicerMVModellerLogic::closePlaneSpline(int i)
         vtkWarningMacro("Couldn't get display node");
     }
 
-    if( i < leafletSplines->GetNumberOfItems() )
+    if( planeNum <= leafletSplines->GetNumberOfItems() )
     {
-        leafletSplines->ReplaceItem(i, poly);
+        leafletSplines->ReplaceItem(planeNum - 1, model->GetPolyData());
     }
 
     fidNode->RemoveAllMarkups();
@@ -506,14 +567,102 @@ void vtkSlicerMVModellerLogic::closePlaneSpline(int i)
 void vtkSlicerMVModellerLogic::generateSurface()
 {
     vtkNew<vtkAppendPolyData> append;
+    int pointsPerSpline = 0, splineCount = 0;
+
     for(int i = 0; i < leafletSplines->GetNumberOfItems(); i++)
     {
         vtkSmartPointer<vtkPolyData> poly = vtkPolyData::SafeDownCast(leafletSplines->GetItemAsObject(i));
-        append->AddInputData(poly);
+        if(poly->GetNumberOfPoints() != 0)
+        {
+            append->AddInputData(poly);
+            pointsPerSpline = poly->GetNumberOfPoints();
+            splineCount++;
+        }
     }
     append->Update();
 
-    vtkSmartPointer<vtkPolyData> surface = interpolateMesh(append->GetOutput());
+    vtkSmartPointer<vtkPolyData> inputPoly = vtkSmartPointer<vtkPolyData>::New();
+    inputPoly->DeepCopy(append->GetOutput());
+
+//    vtkSmartPointer<vtkCellArray> lines = vtkSmartPointer<vtkCellArray>::New();
+
+//    for(int i = 0; i < pointsPerSpline; i += 4)
+//    {
+//        lines->InsertNextCell(splineCount);
+//        for(int j = 0; j < splineCount; j++)
+//        {
+//            lines->InsertCellPoint(i + (j * pointsPerSpline));
+//        }
+
+//    }
+
+//    inputPoly->SetLines(lines);
+
+//    vtkNew<vtkSplineFilter> spline;
+//    spline->SetInputData(inputPoly);
+//    spline->SetSubdivideToSpecified();
+//    spline->SetNumberOfSubdivisions(70);
+//    spline->GetSpline()->ClosedOff();
+//    spline->Update();
+
+//    append->AddInputData(spline->GetOutput());
+//    append->Update();
+
+    vtkSmartPointer<vtkUnstructuredGrid> polys = vtkSmartPointer<vtkUnstructuredGrid>::New();
+    polys->Allocate();
+
+    int lineLength = (pointsPerSpline - LEAFLET_SPLINE_SUBDIVISIONS) / 2;
+    int back = pointsPerSpline - lineLength;
+    int step = LEAFLET_SPLINE_SUBDIVISIONS / lineLength;
+    for(int i = 0; i < LEAFLET_SPLINE_SUBDIVISIONS; i++)
+    {
+        for(int j = 0; j < splineCount - 1; j++)
+        {
+            vtkSmartPointer<vtkWedge> wedge = vtkSmartPointer<vtkWedge>::New();
+            wedge->GetPointIds()->SetId(0, i + (j * pointsPerSpline));
+            wedge->GetPointIds()->SetId(1, i + 1 + (j * pointsPerSpline));
+            wedge->GetPointIds()->SetId(2, back - i / step + (j * pointsPerSpline));
+            wedge->GetPointIds()->SetId(3, i + ((j + 1) * pointsPerSpline));
+            wedge->GetPointIds()->SetId(4, i + 1 + ((j + 1) * pointsPerSpline));
+            wedge->GetPointIds()->SetId(5, back - i / step + ((j + 1) * pointsPerSpline));
+            polys->InsertNextCell(wedge->GetCellType(), wedge->GetPointIds());
+
+
+            if(i != 0 && i % step == 0)
+            {
+                vtkSmartPointer<vtkWedge> wedge2 = vtkSmartPointer<vtkWedge>::New();
+                wedge2->GetPointIds()->SetId(0, back - i / step + (j * pointsPerSpline));
+                wedge2->GetPointIds()->SetId(1, i + (j * pointsPerSpline));
+                wedge2->GetPointIds()->SetId(2, back - i / step + 1 + (j * pointsPerSpline));
+                wedge2->GetPointIds()->SetId(3, back - i / step + ((j + 1) * pointsPerSpline));
+                wedge2->GetPointIds()->SetId(4, i + ((j + 1) * pointsPerSpline));
+                wedge2->GetPointIds()->SetId(5, back - i / step + 1 + ((j + 1) * pointsPerSpline));
+                polys->InsertNextCell(wedge2->GetCellType(), wedge2->GetPointIds());
+            }
+
+        }
+
+    }
+
+
+    polys->SetPoints(inputPoly->GetPoints());
+
+    vtkNew<vtkDataSetSurfaceFilter> sur;
+    sur->SetInputData(polys);
+    sur->Update();
+
+    vtkNew<vtkTriangleFilter> tri;
+    tri->SetInputConnection(sur->GetOutputPort());
+    tri->Update();
+
+    vtkNew<vtkPolyDataNormals> norm;
+    norm->SetInputConnection(tri->GetOutputPort());
+    norm->SetFeatureAngle(60);
+    norm->AutoOrientNormalsOn();
+    norm->Update();
+
+    vtkSmartPointer<vtkPolyData> surface = vtkSmartPointer<vtkPolyData>::New();
+    surface->DeepCopy(norm->GetOutput());
 
     vtkNew<vtkMRMLModelNode> model;
     model->SetName("MVSurface");
@@ -540,13 +689,63 @@ void vtkSlicerMVModellerLogic::generateSurface()
     }
 }
 
-//---------------------------------------------------------------------------
-vtkSmartPointer<vtkPolyData> vtkSlicerMVModellerLogic::interpolateMesh(vtkPolyData *points)
+vtkCollection *vtkSlicerMVModellerLogic::getLeafletSplines() const
 {
-    vtkSmartPointer<vtkMarchingContourFilter> filter = vtkSmartPointer<vtkMarchingContourFilter>::New();
-    filter->SetInputData(points);
-    filter->GenerateValues(1, 0, 1);
-    filter->Update();
+    return leafletSplines;
+}
 
-    return filter->GetOutput();
+//---------------------------------------------------------------------------
+vtkPolyData *vtkSlicerMVModellerLogic::getProfile() const
+{
+    return profile;
+}
+
+//---------------------------------------------------------------------------
+vtkPolyData *vtkSlicerMVModellerLogic::getMergedLeafletSplines()
+{
+    vtkNew<vtkAppendPolyData> append;
+    int pointsPerSpline = 0, splineCount = 0;
+
+    for(int i = 0; i < leafletSplines->GetNumberOfItems(); i++)
+    {
+        vtkSmartPointer<vtkPolyData> poly = vtkPolyData::SafeDownCast(leafletSplines->GetItemAsObject(i));
+        if(poly && poly->GetNumberOfPoints() > 0)
+        {
+            append->AddInputData(poly);
+            pointsPerSpline = poly->GetNumberOfPoints();
+            splineCount++;
+        }
+    }
+    append->Update();
+
+    vtkSmartPointer<vtkPolyData> inputPoly = vtkSmartPointer<vtkPolyData>::New();
+    inputPoly->DeepCopy(append->GetOutput());
+
+    vtkSmartPointer<vtkCellArray> lines = vtkSmartPointer<vtkCellArray>::New();
+
+    for(int i = 0; i < pointsPerSpline; i++)
+    {
+        lines->InsertNextCell(splineCount);
+        for(int j = 0; j < splineCount; j++)
+        {
+            lines->InsertCellPoint(i + (j * pointsPerSpline));
+        }
+
+    }
+
+    inputPoly->SetLines(lines);
+
+    vtkNew<vtkSplineFilter> spline;
+    spline->SetInputData(inputPoly);
+    spline->SetSubdivideToSpecified();
+    spline->SetNumberOfSubdivisions(70);
+    spline->GetSpline()->ClosedOff();
+    spline->Update();
+
+    append->AddInputData(spline->GetOutput());
+    append->Update();
+
+    vtkPolyData *poly = vtkPolyData::New();
+    poly->DeepCopy(append->GetOutput());
+    return poly;
 }

@@ -31,11 +31,13 @@ public slots:
     void on_sliderSelectPlane_valueChanged(double);
     void on_beginDrawPlaneButton_clicked();
     void on_endDrawPlaneButton_clicked();
+    void on_generateSurfaceButton_clicked();
 
 signals:
     void selectMVPlane(const int& i);
     void beginDrawPlane();
     void endDrawPlane(const int& i);
+    void generateSurface();
 
 protected slots:
 

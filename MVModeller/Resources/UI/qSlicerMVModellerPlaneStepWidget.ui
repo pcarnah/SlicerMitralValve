@@ -57,6 +57,13 @@
      </item>
     </layout>
    </item>
+   <item alignment="Qt::AlignHCenter|Qt::AlignVCenter">
+    <widget class="QPushButton" name="generateSurfaceButton">
+     <property name="text">
+      <string>Generate Surface</string>
+     </property>
+    </widget>
+   </item>
   </layout>
  </widget>
  <customwidgets>

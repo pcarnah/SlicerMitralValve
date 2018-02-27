@@ -86,3 +86,11 @@ void qSlicerMVModellerPlaneStepWidget::on_endDrawPlaneButton_clicked()
 
     emit endDrawPlane(static_cast<int>(d->sliderSelectPlane->value()));
 }
+
+// --------------------------------------------------------------------------
+void qSlicerMVModellerPlaneStepWidget::on_generateSurfaceButton_clicked()
+{
+    Q_D(qSlicerMVModellerPlaneStepWidget);
+
+    emit generateSurface();
+}

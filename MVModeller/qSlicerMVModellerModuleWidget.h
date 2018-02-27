@@ -46,6 +46,7 @@ public slots:
   void selectMVPlane(const int &);
   void drawPlaneProfile();
   void endPlaneProfile(const int& i);
+  void generateSurface();
 
 protected:
   QScopedPointer<qSlicerMVModellerModuleWidgetPrivate> d_ptr;

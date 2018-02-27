@@ -58,8 +58,14 @@ public:
   void generateOpeningPlanes();
   void selectMVPlane(const int&);
   void beginDrawPlaneSpline();
-  void closePlaneSpline(int i);
+  void closePlaneSpline(int planeNum);
   void generateSurface();
+
+  vtkPolyData *getProfile() const;
+
+  vtkCollection *getLeafletSplines() const;
+  vtkSmartPointer<vtkPolyData> nodeToPolyCardinalSpline(vtkMRMLMarkupsFiducialNode* sourceNode, bool closed = false, int nSubs = 200);
+  vtkPolyData *getMergedLeafletSplines();
 
 protected:
   vtkSlicerMVModellerLogic();
@@ -72,8 +78,6 @@ protected:
   virtual void OnMRMLSceneNodeAdded(vtkMRMLNode* node);
   virtual void OnMRMLSceneNodeRemoved(vtkMRMLNode* node);
 
-  vtkSmartPointer<vtkPolyData> nodeToPolyCardinalSpline(vtkMRMLMarkupsFiducialNode* sourceNode, bool closed = false);
-  vtkSmartPointer<vtkPolyData> interpolateMesh(vtkPolyData *points);
 private:
 
   vtkSlicerMVModellerLogic(const vtkSlicerMVModellerLogic&); // Not implemented
@@ -84,6 +88,7 @@ private:
   vtkSmartPointer<vtkPolyData> profile;
   vtkSmartPointer<vtkMRMLMarkupsFiducialNode> fidNode;
 
+  static const int LEAFLET_SPLINE_SUBDIVISIONS = 250;
 };
 
 #endif
