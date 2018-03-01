@@ -2,8 +2,6 @@ cmake_minimum_required(VERSION 2.8.9)
 
 project(MVModeller)
 
-set(Slicer_DIR "F:/SlicerBuild/release/Slicer-build")
-
 #-----------------------------------------------------------------------------
 # Extension meta-information
 set(EXTENSION_HOMEPAGE "http://slicer.org/slicerWiki/index.php/Documentation/Nightly/Extensions/MVModeller")

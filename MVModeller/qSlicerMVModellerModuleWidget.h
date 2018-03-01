@@ -23,8 +23,10 @@
 
 #include "qSlicerMVModellerModuleExport.h"
 
+
 class qSlicerMVModellerModuleWidgetPrivate;
 class vtkMRMLNode;
+class vtkMRMLMarkupsFiducialNode;
 
 /// \ingroup Slicer_QtModules_ExtensionTemplate
 class Q_SLICER_QTMODULES_MVMODELLER_EXPORT qSlicerMVModellerModuleWidget :
@@ -39,7 +41,12 @@ public:
   virtual ~qSlicerMVModellerModuleWidget();
 
 public slots:
-
+  void drawMVOpening(vtkMRMLNode*);
+  void closeMVOpening(vtkMRMLNode*);
+  void selectMVPlane(const int &);
+  void drawPlaneProfile();
+  void endPlaneProfile(const int& i);
+  void generateSurface();
 
 protected:
   QScopedPointer<qSlicerMVModellerModuleWidgetPrivate> d_ptr;

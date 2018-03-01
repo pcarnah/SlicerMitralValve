@@ -29,11 +29,19 @@
 
 // MRML includes
 
+// VTK Includes
+#include <vtkSmartPointer.h>
+
 // STD includes
 #include <cstdlib>
 
 #include "vtkSlicerMVModellerModuleLogicExport.h"
 
+class vtkMRMLNode;
+class vtkMRMLMarkupsFiducialNode;
+class vtkCollection;
+class vtkPolyData;
+class vtkPointSet;
 
 /// \ingroup Slicer_QtModules_ExtensionTemplate
 class VTK_SLICER_MVMODELLER_MODULE_LOGIC_EXPORT vtkSlicerMVModellerLogic :
@@ -45,6 +53,20 @@ public:
   vtkTypeMacro(vtkSlicerMVModellerLogic, vtkSlicerModuleLogic);
   void PrintSelf(ostream& os, vtkIndent indent);
 
+  void drawMVOpening(vtkMRMLNode*);
+  void closeMVOpening(vtkMRMLNode*);
+  void generateOpeningPlanes();
+  void selectMVPlane(const int&);
+  void beginDrawPlaneSpline();
+  void closePlaneSpline(int planeNum);
+  void generateSurface();
+
+  vtkPolyData *getProfile() const;
+
+  vtkCollection *getLeafletSplines() const;
+  vtkSmartPointer<vtkPolyData> nodeToPolyCardinalSpline(vtkMRMLMarkupsFiducialNode* sourceNode, bool closed = false, int nSubs = 200);
+  vtkPolyData *getMergedLeafletSplines();
+
 protected:
   vtkSlicerMVModellerLogic();
   virtual ~vtkSlicerMVModellerLogic();
@@ -55,10 +77,18 @@ protected:
   virtual void UpdateFromMRMLScene();
   virtual void OnMRMLSceneNodeAdded(vtkMRMLNode* node);
   virtual void OnMRMLSceneNodeRemoved(vtkMRMLNode* node);
+
 private:
 
   vtkSlicerMVModellerLogic(const vtkSlicerMVModellerLogic&); // Not implemented
   void operator=(const vtkSlicerMVModellerLogic&); // Not implemented
+
+  vtkSmartPointer<vtkCollection> planes;
+  vtkSmartPointer<vtkCollection> leafletSplines;
+  vtkSmartPointer<vtkPolyData> profile;
+  vtkSmartPointer<vtkMRMLMarkupsFiducialNode> fidNode;
+
+  static const int LEAFLET_SPLINE_SUBDIVISIONS = 250;
 };
 
 #endif
