@@ -44,23 +44,20 @@
 #include <vtkIdList.h>
 #include <vtkMatrix4x4.h>
 #include <vtkCollection.h>
-#include <vtkContourFilter.h>
 #include <vtkAppendPolyData.h>
-#include <vtkSurfaceReconstructionFilter.h>
 #include <vtkDelaunay3D.h>
 #include <vtkDelaunay2D.h>
 #include <vtkUnstructuredGrid.h>
 #include <vtkLineSource.h>
-#include <vtkImageDataGeometryFilter.h>
 #include <vtkSplineFilter.h>
-#include <vtkKdTree.h>
 #include <vtkIdTypeArray.h>
 #include <vtkPolyDataNormals.h>
 #include <vtkDataSetSurfaceFilter.h>
 #include <vtkCleanPolyData.h>
 #include <vtkTriangleFilter.h>
 #include <vtkWedge.h>
-#include <vtkButterflySubdivisionFilter.h>
+#include <vtkPolyLine.h>
+#include <vtkKochanekSpline.h>
 
 // vtkITK includes
 #include <vtkITKMorphologicalContourInterpolator.h>
@@ -69,9 +66,7 @@
 #include <cassert>
 #include <cmath>
 #include <array>
-
-//polypartition includes
-#include "polypartition.h"
+#include <limits>
 
 using namespace std;
 
@@ -301,7 +296,6 @@ vtkSmartPointer<vtkPolyData> vtkSlicerMVModellerLogic::nodeToPolyCardinalSpline(
         spline->SetInputData(inputPoly);
         spline->SetSubdivideToSpecified();
         spline->SetNumberOfSubdivisions(nSubs);
-        spline->GetSpline()->ClosedOff();
         spline->Update();
 
         outputPoly->DeepCopy(spline->GetOutput());
@@ -584,68 +578,76 @@ void vtkSlicerMVModellerLogic::generateSurface()
     vtkSmartPointer<vtkPolyData> inputPoly = vtkSmartPointer<vtkPolyData>::New();
     inputPoly->DeepCopy(append->GetOutput());
 
-//    vtkSmartPointer<vtkCellArray> lines = vtkSmartPointer<vtkCellArray>::New();
+    vtkSmartPointer<vtkCellArray> lines = vtkSmartPointer<vtkCellArray>::New();
 
-//    for(int i = 0; i < pointsPerSpline; i += 4)
-//    {
-//        lines->InsertNextCell(splineCount);
-//        for(int j = 0; j < splineCount; j++)
-//        {
-//            lines->InsertCellPoint(i + (j * pointsPerSpline));
-//        }
+    for(int i = 0; i < pointsPerSpline; i++)
+    {
+        lines->InsertNextCell(splineCount);
+        for(int j = 0; j < splineCount; j++)
+        {
+            lines->InsertCellPoint(i + (j * pointsPerSpline));
+        }
 
-//    }
+    }
 
-//    inputPoly->SetLines(lines);
+    inputPoly->SetLines(lines);
 
-//    vtkNew<vtkSplineFilter> spline;
-//    spline->SetInputData(inputPoly);
-//    spline->SetSubdivideToSpecified();
-//    spline->SetNumberOfSubdivisions(70);
-//    spline->GetSpline()->ClosedOff();
-//    spline->Update();
+    vtkNew<vtkSplineFilter> spline;
+    spline->SetInputData(inputPoly);
+    spline->SetSubdivideToSpecified();
+    spline->SetNumberOfSubdivisions(70);
+    spline->GetSpline()->ClosedOff();
+    spline->Update();
 
-//    append->AddInputData(spline->GetOutput());
-//    append->Update();
+    vtkSmartPointer<vtkPolyData> linesPoly = spline->GetOutput();
 
     vtkSmartPointer<vtkUnstructuredGrid> polys = vtkSmartPointer<vtkUnstructuredGrid>::New();
     polys->Allocate();
 
     int lineLength = (pointsPerSpline - LEAFLET_SPLINE_SUBDIVISIONS) / 2;
-    int back = pointsPerSpline - lineLength;
+    int back = linesPoly->GetNumberOfCells() - lineLength;
     int step = LEAFLET_SPLINE_SUBDIVISIONS / lineLength;
-    for(int i = 0; i < LEAFLET_SPLINE_SUBDIVISIONS; i++)
+
+    for(int i = 0; i < LEAFLET_SPLINE_SUBDIVISIONS - 1; i++)
     {
-        for(int j = 0; j < splineCount - 1; j++)
+        vtkNew<vtkIdList> outerLine1;
+        outerLine1->DeepCopy(linesPoly->GetCell(i)->GetPointIds());
+        vtkNew<vtkIdList> outerLine2;
+        outerLine2->DeepCopy(linesPoly->GetCell(i + 1)->GetPointIds());
+        vtkNew<vtkIdList> backLine;
+        backLine->DeepCopy(linesPoly->GetCell(back - i / step)->GetPointIds());
+        vtkNew<vtkIdList> backLine2;
+        backLine2->DeepCopy(linesPoly->GetCell(back - i / step + 1)->GetPointIds());
+
+        for(int j = 0; j < outerLine1->GetNumberOfIds() - 1; j++)
         {
             vtkSmartPointer<vtkWedge> wedge = vtkSmartPointer<vtkWedge>::New();
-            wedge->GetPointIds()->SetId(0, i + (j * pointsPerSpline));
-            wedge->GetPointIds()->SetId(1, i + 1 + (j * pointsPerSpline));
-            wedge->GetPointIds()->SetId(2, back - i / step + (j * pointsPerSpline));
-            wedge->GetPointIds()->SetId(3, i + ((j + 1) * pointsPerSpline));
-            wedge->GetPointIds()->SetId(4, i + 1 + ((j + 1) * pointsPerSpline));
-            wedge->GetPointIds()->SetId(5, back - i / step + ((j + 1) * pointsPerSpline));
+            wedge->GetPointIds()->SetId(0, outerLine1->GetId(j));
+            wedge->GetPointIds()->SetId(1, outerLine2->GetId(j));
+            wedge->GetPointIds()->SetId(2, backLine->GetId(j));
+            wedge->GetPointIds()->SetId(3, outerLine1->GetId(j + 1));
+            wedge->GetPointIds()->SetId(4, outerLine2->GetId(j + 1));
+            wedge->GetPointIds()->SetId(5, backLine->GetId(j + 1));
             polys->InsertNextCell(wedge->GetCellType(), wedge->GetPointIds());
 
 
             if(i != 0 && i % step == 0)
             {
                 vtkSmartPointer<vtkWedge> wedge2 = vtkSmartPointer<vtkWedge>::New();
-                wedge2->GetPointIds()->SetId(0, back - i / step + (j * pointsPerSpline));
-                wedge2->GetPointIds()->SetId(1, i + (j * pointsPerSpline));
-                wedge2->GetPointIds()->SetId(2, back - i / step + 1 + (j * pointsPerSpline));
-                wedge2->GetPointIds()->SetId(3, back - i / step + ((j + 1) * pointsPerSpline));
-                wedge2->GetPointIds()->SetId(4, i + ((j + 1) * pointsPerSpline));
-                wedge2->GetPointIds()->SetId(5, back - i / step + 1 + ((j + 1) * pointsPerSpline));
+                wedge2->GetPointIds()->SetId(0, backLine->GetId(j));
+                wedge2->GetPointIds()->SetId(1, outerLine1->GetId(j));
+                wedge2->GetPointIds()->SetId(2, backLine2->GetId(j));
+                wedge2->GetPointIds()->SetId(3, backLine->GetId(j + 1));
+                wedge2->GetPointIds()->SetId(4, outerLine1->GetId(j + 1));
+                wedge2->GetPointIds()->SetId(5, backLine2->GetId(j + 1));
                 polys->InsertNextCell(wedge2->GetCellType(), wedge2->GetPointIds());
             }
-
         }
 
     }
 
+    polys->SetPoints(linesPoly->GetPoints());
 
-    polys->SetPoints(inputPoly->GetPoints());
 
     vtkNew<vtkDataSetSurfaceFilter> sur;
     sur->SetInputData(polys);
@@ -661,19 +663,15 @@ void vtkSlicerMVModellerLogic::generateSurface()
     norm->AutoOrientNormalsOn();
     norm->Update();
 
-    vtkSmartPointer<vtkPolyData> surface = vtkSmartPointer<vtkPolyData>::New();
-    surface->DeepCopy(norm->GetOutput());
-
     vtkNew<vtkMRMLModelNode> model;
     model->SetName("MVSurface");
 
     this->GetMRMLScene()->AddNode(model.GetPointer());
     model->SetScene(this->GetMRMLScene());
-    vtkDebugMacro("Added model node");
 
     model->CreateDefaultDisplayNodes();
 
-    model->SetAndObservePolyData(surface);
+    model->SetAndObservePolyData(norm->GetOutput());
     model->Modified();
 
     vtkMRMLDisplayNode* displayNode = model->GetDisplayNode();
