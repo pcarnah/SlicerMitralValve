@@ -64,9 +64,6 @@
 #include <vtkPolygon.h>
 #include <vtkCellIterator.h>
 
-// vtkITK includes
-#include <vtkITKMorphologicalContourInterpolator.h>
-
 // STD includes
 #include <cassert>
 #include <cmath>
