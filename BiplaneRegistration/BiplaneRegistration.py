@@ -21,7 +21,7 @@ class BiplaneRegistration(ScriptedLoadableModule):
         self.parent.title = "Biplane Registration" #
         self.parent.categories = ["Examples"]
         self.parent.dependencies = []
-        self.parent.contributors = ["Patrick Carnahan"] # replace with "Firstname Lastname (Organization)"
+        self.parent.contributors = ["Patrick Carnahan (Robarts Research Institute)"] # replace with "Firstname Lastname (Organization)"
         self.parent.helpText = """
 This is a module that allows a philips bi-plane image exported as jpg to be converted and registered in 3D space.
 """
