@@ -17,13 +17,12 @@ class MVSegmenter(ScriptedLoadableModule):
 
     def __init__(self, parent):
         ScriptedLoadableModule.__init__(self, parent)
-        self.parent.title = "MVSegmenter" # TODO make this more human readable by adding spaces
+        self.parent.title = "Mitral Valve Segmenter"
         self.parent.categories = ["Examples"]
         self.parent.dependencies = []
-        self.parent.contributors = ["John Doe (AnyWare Corp.)"] # replace with "Firstname Lastname (Organization)"
+        self.parent.contributors = ["Patrick Carnahan (Robarts Research Institute)"] # replace with "Firstname Lastname (Organization)"
         self.parent.helpText = """
-This is an example of scripted loadable module bundled in an extension.
-It performs a simple thresholding on the input volume and optionally captures a screenshot.
+This module implements an algorithm for automatic mitral valve segmentation using ITK.
 """
         self.parent.helpText += self.getDefaultModuleDocumentationLink()
         self.parent.acknowledgementText = """
@@ -39,6 +38,11 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
     """Uses ScriptedLoadableModuleWidget base class, available at:
     https://github.com/Slicer/Slicer/blob/master/Base/Python/slicer/ScriptedLoadableModule.py
     """
+
+    def __init__(self, parent):
+        ScriptedLoadableModuleWidget.__init__(self, parent)
+
+        self.logic = MVSegmenterLogic()
 
     def setup(self):
         ScriptedLoadableModuleWidget.setup(self)
@@ -68,7 +72,7 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         self.inputSelector.showChildNodeTypes = False
         self.inputSelector.setMRMLScene( slicer.mrmlScene )
         self.inputSelector.setToolTip( "Pick the input to the algorithm." )
-        parametersFormLayout.addRow("Input Volume: ", self.inputSelector)
+        parametersFormLayout.addRow("Input Volume", self.inputSelector)
 
         #
         # input mask selector
@@ -83,7 +87,7 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         self.inputMask.showChildNodeTypes = False
         self.inputMask.setMRMLScene(slicer.mrmlScene)
         self.inputMask.setToolTip("Pick the input to the algorithm.")
-        parametersFormLayout.addRow("Input Mask: ", self.inputMask)
+        parametersFormLayout.addRow("Input Mask", self.inputMask)
 
         #
         # output volume selector
@@ -98,7 +102,7 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         self.outputSelector.showChildNodeTypes = False
         self.outputSelector.setMRMLScene( slicer.mrmlScene )
         self.outputSelector.setToolTip( "Pick the output to the algorithm." )
-        parametersFormLayout.addRow("Output Volume: ", self.outputSelector)
+        parametersFormLayout.addRow("Output Volume", self.outputSelector)
 
 
         #
@@ -117,11 +121,41 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         self.applyButton.enabled = False
         parametersFormLayout.addRow(self.applyButton)
 
+        #
+        # Increment Button
+        #
+        self.incrementButton = qt.QPushButton("Increment Leaflet Segmentation")
+        self.incrementButton.toolTip = "Run the algorithm."
+        self.incrementButton.enabled = False
+        parametersFormLayout.addRow(self.incrementButton)
+
+
+        #
+        #  Undo and Redo Buttons
+        #
+        undoRedoHBox = qt.QHBoxLayout()
+        undoRedoHBox.addStretch(5)
+
+        self.undoButton = qt.QPushButton("Undo")
+        self.undoButton.toolTip = "Undo previous step"
+        self.undoButton.enabled = False
+        undoRedoHBox.addWidget(self.undoButton)
+
+        self.redoButton = qt.QPushButton("Redo")
+        self.redoButton.toolTip = "Undo previous step"
+        self.redoButton.enabled = False
+        undoRedoHBox.addWidget(self.redoButton)
+
+        parametersFormLayout.addRow(undoRedoHBox)
+
         # connections
         self.applyButton.connect('clicked(bool)', self.onApplyButton)
+        self.incrementButton.connect('clicked(bool)', self.onIncrementButton)
         self.inputSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onSelect)
         self.inputMask.connect("currentNodeChanged(vtkMRMLNode*)", self.onSelect)
         self.outputSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onSelect)
+        self.undoButton.connect('clicked(bool)', self.onUndoButton)
+        self.redoButton.connect('clicked(bool)', self.onRedoButton)
 
         # Add vertical spacer
         self.layout.addStretch(1)
@@ -136,10 +170,21 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         self.applyButton.enabled = self.inputSelector.currentNode() and self.inputMask.currentNode() and self.outputSelector.currentNode()
 
     def onApplyButton(self):
-        logic = MVSegmenterLogic()
         enableScreenshotsFlag = self.enableScreenshotsFlagCheckBox.checked
-        logic.run(self.inputSelector.currentNode(), self.inputMask.currentNode(),
+        self.logic.run(self.inputSelector.currentNode(), self.inputMask.currentNode(),
                   self.outputSelector.currentNode())
+        self.incrementButton.enabled = self.applyButton.enabled
+
+    def onIncrementButton(self):
+        self.logic.iterateSecondPass(10, self.outputSelector.currentNode())
+        self.undoButton.enabled = True
+
+    def onUndoButton(self):
+        self.logic.undoIteration(self.outputSelector.currentNode())
+        self.redoButton.enabled = True
+
+    def onRedoButton(self):
+        self.logic.redoIteration(self.outputSelector.currentNode())
 
 #
 # MVSegmenterLogic
@@ -154,6 +199,14 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
     Uses ScriptedLoadableModuleLogic base class, available at:
     https://github.com/Slicer/Slicer/blob/master/Base/Python/slicer/ScriptedLoadableModule.py
     """
+
+    def __init__(self):
+        ScriptedLoadableModuleLogic.__init__(self)
+        self._speedImg = None
+        self._levelSet = None
+
+        self._prevLevelSet = None
+        self._nextLevelSet = None
 
     def hasImageData(self,volumeNode):
         """This is an example logic method that
@@ -224,19 +277,27 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         """
 
         # calculate speed image from input volume
+        # Uses DiscreteGaussian -> GradientMagnitude -> Sigmoid filters
         speedImg = sitkUtils.PullVolumeFromSlicer(inputVolume)
 
-        gradientMag = sitk.GradientMagnitudeRecursiveGaussianImageFilter()
-        gradientMag.SetSigma(1.5)
-        speedImg = gradientMag.Execute(speedImg)
+        blurFilter = sitk.DiscreteGaussianImageFilter()
+        blurFilter.SetMaximumError(0.25)
+        blurFilter.SetMaximumKernelWidth(64)
+        blurFilter.SetUseImageSpacing(False)
+        blurFilter.SetVariance(5)
+        speedImg = blurFilter.Execute(speedImg)
+
+        gradMag = sitk.GradientMagnitudeImageFilter()
+        gradMag.SetUseImageSpacing(False)
+        speedImg = gradMag.Execute(speedImg)
 
         sigmoid = sitk.SigmoidImageFilter()
         sigmoid.SetOutputMinimum(0)
         sigmoid.SetOutputMaximum(1.0)
-        sigmoid.SetAlpha(-7.0)
-        sigmoid.SetBeta(5.0)
+        sigmoid.SetAlpha(-5.0)
+        sigmoid.SetBeta(10.0)
         speedImg = sigmoid.Execute(speedImg)
-
+        sitkUtils.PushVolumeToSlicer(speedImg, outputVolume)
 
         # compute initial level set
         levelSet = sitkUtils.PullVolumeFromSlicer(inputMask)
@@ -245,17 +306,20 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         levelSet = signedDis.Execute(levelSet)
 
 
-        # Run geodesic active contour
+        # Run first pass of geodesic active contour
+        # TODO adjust active contour parameters / make user entered as different image data may need different values to behave
+        # goal is to find middle ground values that work for most cases
+        # could try simplified paramters aimed at fixing leaks/too small and adjust real parameters as needed here
         geodesicActiveContour = sitk.GeodesicActiveContourLevelSetImageFilter()
-        geodesicActiveContour.SetCurvatureScaling(1.5)
-        geodesicActiveContour.SetAdvectionScaling(2.2)
-        geodesicActiveContour.SetPropagationScaling(1.5)
-        geodesicActiveContour.SetMaximumRMSError(0.003)
-        geodesicActiveContour.SetNumberOfIterations(1000)
-
+        geodesicActiveContour.SetCurvatureScaling(2.7)
+        geodesicActiveContour.SetAdvectionScaling(0.8)
+        geodesicActiveContour.SetPropagationScaling(3)
+        geodesicActiveContour.SetMaximumRMSError(0.0018)
+        geodesicActiveContour.SetNumberOfIterations(2000)
 
         out_mask = geodesicActiveContour.Execute(levelSet, speedImg)
         print(geodesicActiveContour.GetElapsedIterations())
+
 
         threshold = sitk.BinaryThresholdImageFilter()
         threshold.SetInsideValue(1)
@@ -264,19 +328,98 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         threshold.SetUpperThreshold(0.0)
         out_mask = threshold.Execute(out_mask)
 
+        # Get region bordering initial blood-pool segmentation
+        distFilter = sitk.DanielssonDistanceMapImageFilter()
+        distFilter.SetInputIsBinary(True)
+        distFilter.SetSquaredDistance(False)
+        distFilter.SetUseImageSpacing(False)
+        distMap = distFilter.Execute(out_mask)
+
+        distThreshold = sitk.BinaryThresholdImageFilter()
+        distThreshold.SetInsideValue(1)
+        distThreshold.SetLowerThreshold(0.5)
+        distThreshold.SetOutsideValue(0)
+        distThreshold.SetUpperThreshold(15)
+        leafletMask = distThreshold.Execute(distMap)
+
+        # Run second pass to get final leaflet segmentation
+        levelSet = signedDis.Execute(leafletMask)
+
+        geodesicActiveContour2 = sitk.GeodesicActiveContourLevelSetImageFilter()
+        geodesicActiveContour2.SetCurvatureScaling(0.8)
+        geodesicActiveContour2.SetAdvectionScaling(0.1)
+        geodesicActiveContour2.SetPropagationScaling(-0.4)
+        geodesicActiveContour2.SetMaximumRMSError(0.0001)
+        geodesicActiveContour2.SetNumberOfIterations(300)
+        out_mask = geodesicActiveContour2.Execute(levelSet, speedImg)
+
+        self._speedImg = speedImg
+        self._levelSet = out_mask
+
+        out_mask = threshold.Execute(out_mask)
+
+        print(geodesicActiveContour2.GetElapsedIterations())
+
         sitkUtils.PushVolumeToSlicer(out_mask, outputVolume)
 
-        dilate = sitk.BinaryDilateImageFilter()
-        dilate.SetKernelRadius((11, 11, 11))
-        dilate.SetKernelType(1)
-        leafletMask = dilate.Execute(out_mask)
+        return out_mask
 
-        subtract = sitk.SubtractImageFilter()
-        leafletMask = subtract.Execute(leafletMask, out_mask)
+    def iterateSecondPass(self, nIter, outputVolumeNode):
 
-        sitkUtils.PushVolumeToSlicer(leafletMask, outputVolume)
+        geodesicActiveContour2 = sitk.GeodesicActiveContourLevelSetImageFilter()
+        geodesicActiveContour2.SetCurvatureScaling(0.8)
+        geodesicActiveContour2.SetAdvectionScaling(0.1)
+        geodesicActiveContour2.SetPropagationScaling(-0.4)
+        geodesicActiveContour2.SetMaximumRMSError(0.0001)
+        geodesicActiveContour2.SetNumberOfIterations(nIter)
+        out_mask = geodesicActiveContour2.Execute(self._levelSet, self._speedImg)
 
-        return True
+        self._prevLevelSet = self._levelSet
+        self._levelSet = out_mask
+
+        print(geodesicActiveContour2.GetElapsedIterations())
+
+        threshold = sitk.BinaryThresholdImageFilter()
+        threshold.SetInsideValue(1)
+        threshold.SetLowerThreshold(-1000.0)
+        threshold.SetOutsideValue(0)
+        threshold.SetUpperThreshold(0.0)
+        out_mask = threshold.Execute(out_mask)
+
+        sitkUtils.PushVolumeToSlicer(out_mask, outputVolumeNode)
+
+        return out_mask
+
+    def undoIteration(self, outputVolumeNode):
+
+        self._nextLevelSet = self._levelSet
+        self._levelSet = self._prevLevelSet
+
+        threshold = sitk.BinaryThresholdImageFilter()
+        threshold.SetInsideValue(1)
+        threshold.SetLowerThreshold(-1000.0)
+        threshold.SetOutsideValue(0)
+        threshold.SetUpperThreshold(0.0)
+
+        sitkUtils.PushVolumeToSlicer(threshold.Execute(self._levelSet), outputVolumeNode)
+
+        return self._levelSet
+
+    def redoIteration(self, outputVolumeNode):
+
+        self._prevLevelSet = self._levelSet
+        self._levelSet = self._nextLevelSet
+
+        threshold = sitk.BinaryThresholdImageFilter()
+        threshold.SetInsideValue(1)
+        threshold.SetLowerThreshold(-1000.0)
+        threshold.SetOutsideValue(0)
+        threshold.SetUpperThreshold(0.0)
+
+        sitkUtils.PushVolumeToSlicer(threshold.Execute(self._levelSet), outputVolumeNode)
+
+        return self._levelSet
+
 
 
 class MVSegmenterTest(ScriptedLoadableModuleTest):
