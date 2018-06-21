@@ -9,3 +9,7 @@ A scripted module that partially automates extracting 2 image planes from Philip
 ## MVModeller
 
 Loadable module prototyping a manual segmentation/modelling process in Slicer.
+
+## MVSegmenter
+
+Scripted module implementing automatix mitral valve segmentation using ITK.
