@@ -113,49 +113,109 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         self.enableScreenshotsFlagCheckBox.setToolTip("If checked, take screen shots for tutorials. Use Save Data to write them to disk.")
         parametersFormLayout.addRow("Enable Screenshots", self.enableScreenshotsFlagCheckBox)
 
-        #
-        # Apply Button
-        #
-        self.applyButton = qt.QPushButton("Apply")
-        self.applyButton.toolTip = "Run the algorithm."
-        self.applyButton.enabled = False
-        parametersFormLayout.addRow(self.applyButton)
 
         #
-        # Increment Button
+        #  First Phase Segmentation
         #
-        self.incrementButton = qt.QPushButton("Increment Leaflet Segmentation")
-        self.incrementButton.toolTip = "Run the algorithm."
-        self.incrementButton.enabled = False
-        parametersFormLayout.addRow(self.incrementButton)
+        firstPassCollapsibleButton = ctk.ctkCollapsibleButton()
+        firstPassCollapsibleButton.text = "Blood Pool Segmentation"
+        self.layout.addWidget(firstPassCollapsibleButton)
 
+        # Layout within the dummy collapsible button
+        firstPassFormLayout = qt.QFormLayout(firstPassCollapsibleButton)
 
         #
-        #  Undo and Redo Buttons
+        # Initialize BP Button
         #
-        undoRedoHBox = qt.QHBoxLayout()
-        undoRedoHBox.addStretch(5)
+        self.initBPButton = qt.QPushButton("Initialize Segmentation")
+        self.initBPButton.toolTip = "Run the initial segmentation pass."
+        self.initBPButton.enabled = False
+        firstPassFormLayout.addRow(self.initBPButton)
+
+        #
+        #  Increment First Pass Buttons
+        #
+        incrementFirstHBox = qt.QHBoxLayout()
+        incrementFirstHBox.addStretch(5)
+
+        self.incrementFirstButton50 = qt.QPushButton("+50")
+        self.incrementFirstButton50.toolTip = "Run the algorithm for 50 more iterations"
+        self.incrementFirstButton50.enabled = False
+        incrementFirstHBox.addWidget(self.incrementFirstButton50)
+
+        self.incrementFirstButton100 = qt.QPushButton("+100")
+        self.incrementFirstButton100.toolTip = "Run the algorithm for 100 more iterations"
+        self.incrementFirstButton100.enabled = False
+        incrementFirstHBox.addWidget(self.incrementFirstButton100)
+
+        self.incrementFirstButton500 = qt.QPushButton("+500")
+        self.incrementFirstButton500.toolTip = "Run the algorithm for 500 more iterations"
+        self.incrementFirstButton500.enabled = False
+        incrementFirstHBox.addWidget(self.incrementFirstButton500)
+
+        firstPassFormLayout.addRow("Increment Segmentation", incrementFirstHBox)
+
+        #
+        #  Second Phase Segmentation
+        #
+        secondPassCollapsibleButton = ctk.ctkCollapsibleButton()
+        secondPassCollapsibleButton.text = "Leaflet Segmentation"
+        self.layout.addWidget(secondPassCollapsibleButton)
+
+        # Layout within the dummy collapsible button
+        secondPassFormLayout = qt.QFormLayout(secondPassCollapsibleButton)
+
+        #Initialize
+        self.initLeafletButton = qt.QPushButton("Initialize Segmentation")
+        self.initLeafletButton.toolTip = "Run the initial leaflet segmentation pass."
+        self.initLeafletButton.enabled = False
+        secondPassFormLayout.addRow(self.initLeafletButton)
+
+        #
+        # Increment Buttons
+        #
+
+        incrementHBox = qt.QHBoxLayout()
+        incrementHBox.addStretch(5)
+
+        self.incrementButton10 = qt.QPushButton("+10")
+        self.incrementButton10.toolTip = "Run the algorithm for 10 more iterations."
+        self.incrementButton10.enabled = False
+        incrementHBox.addWidget(self.incrementButton10)
+
+        self.incrementButton50 = qt.QPushButton("+50")
+        self.incrementButton50.toolTip = "Run the algorithm for 50 more iterations."
+        self.incrementButton50.enabled = False
+        incrementHBox.addWidget(self.incrementButton50)
 
         self.undoButton = qt.QPushButton("Undo")
         self.undoButton.toolTip = "Undo previous step"
         self.undoButton.enabled = False
-        undoRedoHBox.addWidget(self.undoButton)
+        incrementHBox.addWidget(self.undoButton)
 
         self.redoButton = qt.QPushButton("Redo")
-        self.redoButton.toolTip = "Undo previous step"
+        self.redoButton.toolTip = "Redo previous step"
         self.redoButton.enabled = False
-        undoRedoHBox.addWidget(self.redoButton)
+        incrementHBox.addWidget(self.redoButton)
 
-        parametersFormLayout.addRow(undoRedoHBox)
+        secondPassFormLayout.addRow("Increment Segmentation", incrementHBox)
 
         # connections
-        self.applyButton.connect('clicked(bool)', self.onApplyButton)
-        self.incrementButton.connect('clicked(bool)', self.onIncrementButton)
+        self.initBPButton.connect('clicked(bool)', self.onInitBPButton)
+        self.incrementFirstButton50.connect('clicked(bool)', self.onIncrementFirst50Button)
+        self.incrementFirstButton100.connect('clicked(bool)', self.onIncrementFirst100Button)
+        self.incrementFirstButton500.connect('clicked(bool)', self.onIncrementFirst500Button)
+
+        self.initLeafletButton.connect('clicked(bool)', self.onInitLeafletButton)
+        self.incrementButton10.connect('clicked(bool)', self.onIncrement10Button)
+        self.incrementButton50.connect('clicked(bool)', self.onIncrement50Button)
+        self.undoButton.connect('clicked(bool)', self.onUndoButton)
+        self.redoButton.connect('clicked(bool)', self.onRedoButton)
+
         self.inputSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onSelect)
         self.inputMask.connect("currentNodeChanged(vtkMRMLNode*)", self.onSelect)
         self.outputSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onSelect)
-        self.undoButton.connect('clicked(bool)', self.onUndoButton)
-        self.redoButton.connect('clicked(bool)', self.onRedoButton)
+
 
         # Add vertical spacer
         self.layout.addStretch(1)
@@ -167,24 +227,87 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         pass
 
     def onSelect(self):
-        self.applyButton.enabled = self.inputSelector.currentNode() and self.inputMask.currentNode() and self.outputSelector.currentNode()
+        self.initBPButton.enabled = self.inputSelector.currentNode() and self.inputMask.currentNode() and self.outputSelector.currentNode()
 
-    def onApplyButton(self):
-        enableScreenshotsFlag = self.enableScreenshotsFlagCheckBox.checked
-        self.logic.run(self.inputSelector.currentNode(), self.inputMask.currentNode(),
-                  self.outputSelector.currentNode())
-        self.incrementButton.enabled = self.applyButton.enabled
+    def onInitBPButton(self):
+        try:
+            # This can be a long operation - indicate it to the user
+            qt.QApplication.setOverrideCursor(qt.Qt.WaitCursor)
 
-    def onIncrementButton(self):
+            enableScreenshotsFlag = self.enableScreenshotsFlagCheckBox.checked
+            self.logic.initBPSeg(self.inputSelector.currentNode(), self.inputMask.currentNode(),
+                                 self.outputSelector.currentNode())
+            self.incrementFirstButton50.enabled = True
+            self.incrementFirstButton100.enabled = True
+            self.incrementFirstButton500.enabled = True
+            self.initLeafletButton.enabled = True
+        finally:
+            qt.QApplication.restoreOverrideCursor()
+
+    def onIncrementFirst50Button(self):
+        try:
+            # This can be a long operation - indicate it to the user
+            qt.QApplication.setOverrideCursor(qt.Qt.WaitCursor)
+
+            self.logic.iterateFirstPass(50, self.outputSelector.currentNode())
+        finally:
+            qt.QApplication.restoreOverrideCursor()
+
+    def onIncrementFirst100Button(self):
+        try:
+            # This can be a long operation - indicate it to the user
+            qt.QApplication.setOverrideCursor(qt.Qt.WaitCursor)
+
+            self.logic.iterateFirstPass(100, self.outputSelector.currentNode())
+        finally:
+            qt.QApplication.restoreOverrideCursor()
+
+    def onIncrementFirst500Button(self):
+        try:
+            # This can be a long operation - indicate it to the user
+            qt.QApplication.setOverrideCursor(qt.Qt.WaitCursor)
+
+            self.logic.iterateFirstPass(500, self.outputSelector.currentNode())
+
+        finally:
+            qt.QApplication.restoreOverrideCursor()
+
+    def onInitLeafletButton(self):
+        try:
+            # This can be a long operation - indicate it to the user
+            qt.QApplication.setOverrideCursor(qt.Qt.WaitCursor)
+
+            self.logic.initLeafletSeg(self.outputSelector.currentNode())
+            self.incrementButton10.enabled = True
+            self.incrementButton50.enabled = True
+
+        finally:
+            qt.QApplication.restoreOverrideCursor()
+
+    def onIncrement10Button(self):
         self.logic.iterateSecondPass(10, self.outputSelector.currentNode())
         self.undoButton.enabled = True
+
+    def onIncrement50Button(self):
+        try:
+            # This can be a long operation - indicate it to the user
+            qt.QApplication.setOverrideCursor(qt.Qt.WaitCursor)
+
+            self.logic.iterateSecondPass(50, self.outputSelector.currentNode())
+            self.undoButton.enabled = True
+
+        finally:
+            qt.QApplication.restoreOverrideCursor()
 
     def onUndoButton(self):
         self.logic.undoIteration(self.outputSelector.currentNode())
         self.redoButton.enabled = True
+        self.undoButton.enabled = False
 
     def onRedoButton(self):
         self.logic.redoIteration(self.outputSelector.currentNode())
+        self.redoButton.enabled = False
+        self.undoButton.enabled = True
 
 #
 # MVSegmenterLogic
@@ -204,6 +327,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         ScriptedLoadableModuleLogic.__init__(self)
         self._speedImg = None
         self._levelSet = None
+        self._bpLevelSet = None
 
         self._prevLevelSet = None
         self._nextLevelSet = None
@@ -271,7 +395,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         annotationLogic = slicer.modules.annotations.logic()
         annotationLogic.CreateSnapShot(name, description, type, 1, imageData)
 
-    def run(self, inputVolume, inputMask, outputVolume):
+    def initBPSeg(self, inputVolume, inputMask, outputVolume):
         """
         Run the actual algorithm
         """
@@ -297,7 +421,8 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         sigmoid.SetAlpha(-5.0)
         sigmoid.SetBeta(10.0)
         speedImg = sigmoid.Execute(speedImg)
-        sitkUtils.PushVolumeToSlicer(speedImg, outputVolume)
+
+        self._speedImg = speedImg
 
         # compute initial level set
         levelSet = sitkUtils.PullVolumeFromSlicer(inputMask)
@@ -309,17 +434,18 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         # Run first pass of geodesic active contour
         # TODO adjust active contour parameters / make user entered as different image data may need different values to behave
         # goal is to find middle ground values that work for most cases
-        # could try simplified paramters aimed at fixing leaks/too small and adjust real parameters as needed here
+        # could try simplified parameters aimed at fixing leaks/too small and adjust real parameters as needed here
         geodesicActiveContour = sitk.GeodesicActiveContourLevelSetImageFilter()
         geodesicActiveContour.SetCurvatureScaling(2.7)
         geodesicActiveContour.SetAdvectionScaling(0.8)
         geodesicActiveContour.SetPropagationScaling(3)
-        geodesicActiveContour.SetMaximumRMSError(0.0018)
-        geodesicActiveContour.SetNumberOfIterations(2000)
+        geodesicActiveContour.SetMaximumRMSError(0.0001)
+        geodesicActiveContour.SetNumberOfIterations(1000)
 
         out_mask = geodesicActiveContour.Execute(levelSet, speedImg)
         print(geodesicActiveContour.GetElapsedIterations())
 
+        self._bpLevelSet = out_mask
 
         threshold = sitk.BinaryThresholdImageFilter()
         threshold.SetInsideValue(1)
@@ -328,12 +454,45 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         threshold.SetUpperThreshold(0.0)
         out_mask = threshold.Execute(out_mask)
 
+        sitkUtils.PushVolumeToSlicer(out_mask, outputVolume)
+
+    def iterateFirstPass(self, nIter, outputVolume):
+        geodesicActiveContour = sitk.GeodesicActiveContourLevelSetImageFilter()
+        geodesicActiveContour.SetCurvatureScaling(2.7)
+        geodesicActiveContour.SetAdvectionScaling(0.9)
+        geodesicActiveContour.SetPropagationScaling(1.8)
+        geodesicActiveContour.SetMaximumRMSError(0.00001)
+        geodesicActiveContour.SetNumberOfIterations(nIter)
+
+        out_mask = geodesicActiveContour.Execute(self._bpLevelSet, self._speedImg)
+        print(geodesicActiveContour.GetElapsedIterations())
+
+        self._bpLevelSet = out_mask
+
+        threshold = sitk.BinaryThresholdImageFilter()
+        threshold.SetInsideValue(1)
+        threshold.SetLowerThreshold(-1000.0)
+        threshold.SetOutsideValue(0)
+        threshold.SetUpperThreshold(0.0)
+        out_mask = threshold.Execute(out_mask)
+
+        sitkUtils.PushVolumeToSlicer(out_mask, outputVolume)
+
+    def initLeafletSeg(self, outputVolume):
+
         # Get region bordering initial blood-pool segmentation
+        threshold = sitk.BinaryThresholdImageFilter()
+        threshold.SetInsideValue(1)
+        threshold.SetLowerThreshold(-1000.0)
+        threshold.SetOutsideValue(0)
+        threshold.SetUpperThreshold(0.0)
+        distMap = threshold.Execute(self._bpLevelSet)
+
         distFilter = sitk.DanielssonDistanceMapImageFilter()
         distFilter.SetInputIsBinary(True)
         distFilter.SetSquaredDistance(False)
         distFilter.SetUseImageSpacing(False)
-        distMap = distFilter.Execute(out_mask)
+        distMap = distFilter.Execute(distMap)
 
         distThreshold = sitk.BinaryThresholdImageFilter()
         distThreshold.SetInsideValue(1)
@@ -343,6 +502,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         leafletMask = distThreshold.Execute(distMap)
 
         # Run second pass to get final leaflet segmentation
+        signedDis = sitk.SignedDanielssonDistanceMapImageFilter()
         levelSet = signedDis.Execute(leafletMask)
 
         geodesicActiveContour2 = sitk.GeodesicActiveContourLevelSetImageFilter()
@@ -350,12 +510,16 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         geodesicActiveContour2.SetAdvectionScaling(0.1)
         geodesicActiveContour2.SetPropagationScaling(-0.4)
         geodesicActiveContour2.SetMaximumRMSError(0.0001)
-        geodesicActiveContour2.SetNumberOfIterations(300)
-        out_mask = geodesicActiveContour2.Execute(levelSet, speedImg)
+        geodesicActiveContour2.SetNumberOfIterations(400)
+        out_mask = geodesicActiveContour2.Execute(levelSet, self._speedImg)
 
-        self._speedImg = speedImg
         self._levelSet = out_mask
 
+        threshold = sitk.BinaryThresholdImageFilter()
+        threshold.SetInsideValue(1)
+        threshold.SetLowerThreshold(-1000.0)
+        threshold.SetOutsideValue(0)
+        threshold.SetUpperThreshold(0.0)
         out_mask = threshold.Execute(out_mask)
 
         print(geodesicActiveContour2.GetElapsedIterations())
