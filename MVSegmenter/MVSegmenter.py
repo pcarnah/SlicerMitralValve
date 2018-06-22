@@ -188,6 +188,11 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         self.incrementButton50.enabled = False
         incrementHBox.addWidget(self.incrementButton50)
 
+        self.incrementButton200 = qt.QPushButton("+200")
+        self.incrementButton200.toolTip = "Run the algorithm for 200 more iterations."
+        self.incrementButton200.enabled = False
+        incrementHBox.addWidget(self.incrementButton200)
+
         self.undoButton = qt.QPushButton("Undo")
         self.undoButton.toolTip = "Undo previous step"
         self.undoButton.enabled = False
@@ -209,6 +214,7 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         self.initLeafletButton.connect('clicked(bool)', self.onInitLeafletButton)
         self.incrementButton10.connect('clicked(bool)', self.onIncrement10Button)
         self.incrementButton50.connect('clicked(bool)', self.onIncrement50Button)
+        self.incrementButton200.connect('clicked(bool)', self.onIncrement200Button)
         self.undoButton.connect('clicked(bool)', self.onUndoButton)
         self.redoButton.connect('clicked(bool)', self.onRedoButton)
 
@@ -280,6 +286,7 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
             self.logic.initLeafletSeg(self.outputSelector.currentNode())
             self.incrementButton10.enabled = True
             self.incrementButton50.enabled = True
+            self.incrementButton200.enabled = True
 
         finally:
             qt.QApplication.restoreOverrideCursor()
@@ -294,6 +301,17 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
             qt.QApplication.setOverrideCursor(qt.Qt.WaitCursor)
 
             self.logic.iterateSecondPass(50, self.outputSelector.currentNode())
+            self.undoButton.enabled = True
+
+        finally:
+            qt.QApplication.restoreOverrideCursor()
+
+    def onIncrement200Button(self):
+        try:
+            # This can be a long operation - indicate it to the user
+            qt.QApplication.setOverrideCursor(qt.Qt.WaitCursor)
+
+            self.logic.iterateSecondPass(200, self.outputSelector.currentNode())
             self.undoButton.enabled = True
 
         finally:
@@ -488,21 +506,18 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         threshold.SetUpperThreshold(0.0)
         distMap = threshold.Execute(self._bpLevelSet)
 
-        distFilter = sitk.DanielssonDistanceMapImageFilter()
-        distFilter.SetInputIsBinary(True)
-        distFilter.SetSquaredDistance(False)
-        distFilter.SetUseImageSpacing(False)
-        distMap = distFilter.Execute(distMap)
+        signedDis = sitk.SignedDanielssonDistanceMapImageFilter()
+        distMap = signedDis.Execute(distMap)
 
         distThreshold = sitk.BinaryThresholdImageFilter()
         distThreshold.SetInsideValue(1)
-        distThreshold.SetLowerThreshold(0.5)
+        distThreshold.SetLowerThreshold(-5)
         distThreshold.SetOutsideValue(0)
-        distThreshold.SetUpperThreshold(15)
+        distThreshold.SetUpperThreshold(13)
         leafletMask = distThreshold.Execute(distMap)
 
         # Run second pass to get final leaflet segmentation
-        signedDis = sitk.SignedDanielssonDistanceMapImageFilter()
+
         levelSet = signedDis.Execute(leafletMask)
 
         geodesicActiveContour2 = sitk.GeodesicActiveContourLevelSetImageFilter()
@@ -510,7 +525,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         geodesicActiveContour2.SetAdvectionScaling(0.1)
         geodesicActiveContour2.SetPropagationScaling(-0.4)
         geodesicActiveContour2.SetMaximumRMSError(0.0001)
-        geodesicActiveContour2.SetNumberOfIterations(400)
+        geodesicActiveContour2.SetNumberOfIterations(500)
         out_mask = geodesicActiveContour2.Execute(levelSet, self._speedImg)
 
         self._levelSet = out_mask
