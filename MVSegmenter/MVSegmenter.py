@@ -6,6 +6,7 @@ import sitkUtils
 from slicer.ScriptedLoadableModule import *
 import logging
 
+
 #
 # MVSegmenter
 #
@@ -20,7 +21,8 @@ class MVSegmenter(ScriptedLoadableModule):
         self.parent.title = "Mitral Valve Segmenter"
         self.parent.categories = ["Examples"]
         self.parent.dependencies = []
-        self.parent.contributors = ["Patrick Carnahan (Robarts Research Institute)"] # replace with "Firstname Lastname (Organization)"
+        self.parent.contributors = [
+            "Patrick Carnahan (Robarts Research Institute)"]  # replace with "Firstname Lastname (Organization)"
         self.parent.helpText = """
 This module implements an algorithm for automatic mitral valve segmentation using ITK.
 """
@@ -28,7 +30,8 @@ This module implements an algorithm for automatic mitral valve segmentation usin
         self.parent.acknowledgementText = """
 This file was originally developed by Jean-Christophe Fillion-Robin, Kitware Inc.
 and Steve Pieper, Isomics, Inc. and was partially funded by NIH grant 3P41RR013218-12S1.
-""" # replace with organization, grant and thanks.
+"""  # replace with organization, grant and thanks.
+
 
 #
 # MVSegmenterWidget
@@ -70,8 +73,8 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         self.inputSelector.noneEnabled = False
         self.inputSelector.showHidden = False
         self.inputSelector.showChildNodeTypes = False
-        self.inputSelector.setMRMLScene( slicer.mrmlScene )
-        self.inputSelector.setToolTip( "Pick the input to the algorithm." )
+        self.inputSelector.setMRMLScene(slicer.mrmlScene)
+        self.inputSelector.setToolTip("Pick the input to the algorithm.")
         parametersFormLayout.addRow("Input Volume", self.inputSelector)
 
         #
@@ -90,29 +93,28 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         parametersFormLayout.addRow("Input Mask", self.inputMask)
 
         #
-        # output volume selector
+        # output segmentation selector
         #
         self.outputSelector = slicer.qMRMLNodeComboBox()
-        self.outputSelector.nodeTypes = ["vtkMRMLLabelMapVolumeNode"]
+        self.outputSelector.nodeTypes = ["vtkMRMLSegmentationNode"]
         self.outputSelector.selectNodeUponCreation = True
         self.outputSelector.addEnabled = True
-        self.outputSelector.removeEnabled = True
+        self.outputSelector.removeEnabled = False
         self.outputSelector.noneEnabled = True
         self.outputSelector.showHidden = False
         self.outputSelector.showChildNodeTypes = False
-        self.outputSelector.setMRMLScene( slicer.mrmlScene )
-        self.outputSelector.setToolTip( "Pick the output to the algorithm." )
-        parametersFormLayout.addRow("Output Volume", self.outputSelector)
-
+        self.outputSelector.setMRMLScene(slicer.mrmlScene)
+        self.outputSelector.setToolTip("Pick the output to the algorithm.")
+        parametersFormLayout.addRow("Output Segmentation", self.outputSelector)
 
         #
         # check box to trigger taking screen shots for later use in tutorials
         #
         self.enableScreenshotsFlagCheckBox = qt.QCheckBox()
         self.enableScreenshotsFlagCheckBox.checked = 0
-        self.enableScreenshotsFlagCheckBox.setToolTip("If checked, take screen shots for tutorials. Use Save Data to write them to disk.")
+        self.enableScreenshotsFlagCheckBox.setToolTip(
+            "If checked, take screen shots for tutorials. Use Save Data to write them to disk.")
         parametersFormLayout.addRow("Enable Screenshots", self.enableScreenshotsFlagCheckBox)
-
 
         #
         #  First Phase Segmentation
@@ -165,7 +167,7 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         # Layout within the dummy collapsible button
         secondPassFormLayout = qt.QFormLayout(secondPassCollapsibleButton)
 
-        #Initialize
+        # Initialize
         self.initLeafletButton = qt.QPushButton("Initialize Segmentation")
         self.initLeafletButton.toolTip = "Run the initial leaflet segmentation pass."
         self.initLeafletButton.enabled = False
@@ -221,7 +223,6 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         self.inputSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onSelect)
         self.inputMask.connect("currentNodeChanged(vtkMRMLNode*)", self.onSelect)
         self.outputSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onSelect)
-
 
         # Add vertical spacer
         self.layout.addStretch(1)
@@ -327,6 +328,7 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         self.redoButton.enabled = False
         self.undoButton.enabled = True
 
+
 #
 # MVSegmenterLogic
 #
@@ -350,7 +352,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         self._prevLevelSet = None
         self._nextLevelSet = None
 
-    def hasImageData(self,volumeNode):
+    def hasImageData(self, volumeNode):
         """This is an example logic method that
         returns true if the passed in volume
         node has valid image data
@@ -372,14 +374,16 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         if not outputVolumeNode:
             logging.debug('isValidInputOutputData failed: no output volume node defined')
             return False
-        if inputVolumeNode.GetID()==outputVolumeNode.GetID():
-            logging.debug('isValidInputOutputData failed: input and output volume is the same. Create a new volume for output to avoid this error.')
+        if inputVolumeNode.GetID() == outputVolumeNode.GetID():
+            logging.debug(
+                'isValidInputOutputData failed: input and output volume is the same. Create a new volume for output to avoid this error.')
             return False
         return True
 
-    def takeScreenshot(self,name,description,type=-1):
+    def takeScreenshot(self, name, description, type=-1):
         # show the message even if not taking a screen shot
-        slicer.util.delayDisplay('Take screenshot: '+description+'.\nResult is available in the Annotations module.', 3000)
+        slicer.util.delayDisplay(
+            'Take screenshot: ' + description + '.\nResult is available in the Annotations module.', 3000)
 
         lm = slicer.app.layoutManager()
         # switch on the type to get the requested window
@@ -408,7 +412,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         # grab and convert to vtk image data
         qimage = ctk.ctkWidgetsUtils.grabWidget(widget)
         imageData = vtk.vtkImageData()
-        slicer.qMRMLUtils().qImageToVtkImageData(qimage,imageData)
+        slicer.qMRMLUtils().qImageToVtkImageData(qimage, imageData)
 
         annotationLogic = slicer.modules.annotations.logic()
         annotationLogic.CreateSnapShot(name, description, type, 1, imageData)
@@ -448,7 +452,6 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         signedDis = sitk.SignedDanielssonDistanceMapImageFilter()
         levelSet = signedDis.Execute(levelSet)
 
-
         # Run first pass of geodesic active contour
         # TODO adjust active contour parameters / make user entered as different image data may need different values to behave
         # goal is to find middle ground values that work for most cases
@@ -472,7 +475,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         threshold.SetUpperThreshold(0.0)
         out_mask = threshold.Execute(out_mask)
 
-        sitkUtils.PushVolumeToSlicer(out_mask, outputVolume)
+        self.pushITKImageToSegmentation(out_mask, outputVolume, 'BP Segmentation')
 
     def iterateFirstPass(self, nIter, outputVolume):
         geodesicActiveContour = sitk.GeodesicActiveContourLevelSetImageFilter()
@@ -494,7 +497,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         threshold.SetUpperThreshold(0.0)
         out_mask = threshold.Execute(out_mask)
 
-        sitkUtils.PushVolumeToSlicer(out_mask, outputVolume)
+        self.pushITKImageToSegmentation(out_mask, outputVolume, 'BP Segmentation')
 
     def initLeafletSeg(self, outputVolume):
 
@@ -539,7 +542,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         print(geodesicActiveContour2.GetElapsedIterations())
 
-        sitkUtils.PushVolumeToSlicer(out_mask, outputVolume)
+        self.pushITKImageToSegmentation(out_mask, outputVolume, 'Leaflet Segmentation')
 
         return out_mask
 
@@ -565,7 +568,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         threshold.SetUpperThreshold(0.0)
         out_mask = threshold.Execute(out_mask)
 
-        sitkUtils.PushVolumeToSlicer(out_mask, outputVolumeNode)
+        self.pushITKImageToSegmentation(out_mask, outputVolumeNode, 'Leaflet Segmentation')
 
         return out_mask
 
@@ -580,7 +583,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         threshold.SetOutsideValue(0)
         threshold.SetUpperThreshold(0.0)
 
-        sitkUtils.PushVolumeToSlicer(threshold.Execute(self._levelSet), outputVolumeNode)
+        self.pushITKImageToSegmentation(threshold.Execute(self._levelSet), outputVolumeNode, 'Leaflet Segmentation')
 
         return self._levelSet
 
@@ -595,10 +598,25 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         threshold.SetOutsideValue(0)
         threshold.SetUpperThreshold(0.0)
 
-        sitkUtils.PushVolumeToSlicer(threshold.Execute(self._levelSet), outputVolumeNode)
+        self.pushITKImageToSegmentation(threshold.Execute(self._levelSet), outputVolumeNode, 'Leaflet Segmentation')
 
         return self._levelSet
 
+    def pushITKImageToSegmentation(self, img, segmentationNode, segmentId='Leaflet Segmentation'):
+        if segmentationNode.GetSegmentation().GetSegmentIndex(segmentId) == -1:
+            segmentationNode.GetSegmentation().AddEmptySegment(segmentId)
+
+        # Create temporary label map node
+        tempNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLabelMapVolumeNode', 'temp_labelmap')
+        sitkUtils.PushVolumeToSlicer(img, tempNode)
+
+        segmentationIds = vtk.vtkStringArray()
+        segmentationIds.InsertNextValue(segmentId)
+
+        slicer.modules.segmentations.logic().ImportLabelmapToSegmentationNode(tempNode, segmentationNode,
+                                                                              segmentationIds)
+
+        slicer.mrmlScene.RemoveNode(tempNode)
 
 
 class MVSegmenterTest(ScriptedLoadableModuleTest):
@@ -640,7 +658,7 @@ class MVSegmenterTest(ScriptedLoadableModuleTest):
             ('http://slicer.kitware.com/midas3/download?items=5767', 'FA.nrrd', slicer.util.loadVolume),
         )
 
-        for url,name,loader in downloads:
+        for url, name, loader in downloads:
             filePath = slicer.app.temporaryPath + '/' + name
             if not os.path.exists(filePath) or os.stat(filePath).st_size == 0:
                 logging.info('Requesting download %s from %s...\n' % (name, url))
@@ -652,5 +670,5 @@ class MVSegmenterTest(ScriptedLoadableModuleTest):
 
         volumeNode = slicer.util.getNode(pattern="FA")
         logic = MVSegmenterLogic()
-        self.assertIsNotNone( logic.hasImageData(volumeNode) )
+        self.assertIsNotNone(logic.hasImageData(volumeNode))
         self.delayDisplay('Test passed!')
