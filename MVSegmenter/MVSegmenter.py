@@ -22,7 +22,7 @@ class MVSegmenter(ScriptedLoadableModule):
         self.parent.categories = ["Examples"]
         self.parent.dependencies = []
         self.parent.contributors = [
-            "Patrick Carnahan (Robarts Research Institute)"]  # replace with "Firstname Lastname (Organization)"
+            "Patrick Carnahan (Robarts Research Institute)"]
         self.parent.helpText = """
 This module implements an algorithm for automatic mitral valve segmentation using ITK.
 """
@@ -155,6 +155,16 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         self.incrementFirstButton500.enabled = False
         incrementFirstHBox.addWidget(self.incrementFirstButton500)
 
+        self.undoButtonBP = qt.QPushButton("Undo")
+        self.undoButtonBP.toolTip = "Undo previous step"
+        self.undoButtonBP.enabled = False
+        incrementFirstHBox.addWidget(self.undoButtonBP)
+
+        self.redoButtonBP = qt.QPushButton("Redo")
+        self.redoButtonBP.toolTip = "Redo previous step"
+        self.redoButtonBP.enabled = False
+        incrementFirstHBox.addWidget(self.redoButtonBP)
+
         firstPassFormLayout.addRow("Increment Segmentation", incrementFirstHBox)
 
         #
@@ -195,15 +205,15 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         self.incrementButton200.enabled = False
         incrementHBox.addWidget(self.incrementButton200)
 
-        self.undoButton = qt.QPushButton("Undo")
-        self.undoButton.toolTip = "Undo previous step"
-        self.undoButton.enabled = False
-        incrementHBox.addWidget(self.undoButton)
+        self.undoButtonLeaflet = qt.QPushButton("Undo")
+        self.undoButtonLeaflet.toolTip = "Undo previous step"
+        self.undoButtonLeaflet.enabled = False
+        incrementHBox.addWidget(self.undoButtonLeaflet)
 
-        self.redoButton = qt.QPushButton("Redo")
-        self.redoButton.toolTip = "Redo previous step"
-        self.redoButton.enabled = False
-        incrementHBox.addWidget(self.redoButton)
+        self.redoButtonLeaflet = qt.QPushButton("Redo")
+        self.redoButtonLeaflet.toolTip = "Redo previous step"
+        self.redoButtonLeaflet.enabled = False
+        incrementHBox.addWidget(self.redoButtonLeaflet)
 
         secondPassFormLayout.addRow("Increment Segmentation", incrementHBox)
 
@@ -212,13 +222,15 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         self.incrementFirstButton50.connect('clicked(bool)', self.onIncrementFirst50Button)
         self.incrementFirstButton100.connect('clicked(bool)', self.onIncrementFirst100Button)
         self.incrementFirstButton500.connect('clicked(bool)', self.onIncrementFirst500Button)
+        self.undoButtonBP.connect('clicked(bool)', self.onUndoButtonBP)
+        self.redoButtonBP.connect('clicked(bool)', self.onRedoButtonBP)
 
         self.initLeafletButton.connect('clicked(bool)', self.onInitLeafletButton)
         self.incrementButton10.connect('clicked(bool)', self.onIncrement10Button)
         self.incrementButton50.connect('clicked(bool)', self.onIncrement50Button)
         self.incrementButton200.connect('clicked(bool)', self.onIncrement200Button)
-        self.undoButton.connect('clicked(bool)', self.onUndoButton)
-        self.redoButton.connect('clicked(bool)', self.onRedoButton)
+        self.undoButtonLeaflet.connect('clicked(bool)', self.onUndoButtonLeaflet)
+        self.redoButtonLeaflet.connect('clicked(bool)', self.onRedoButtonLeaflet)
 
         self.inputSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onSelect)
         self.inputMask.connect("currentNodeChanged(vtkMRMLNode*)", self.onSelect)
@@ -257,6 +269,8 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
             qt.QApplication.setOverrideCursor(qt.Qt.WaitCursor)
 
             self.logic.iterateFirstPass(50, self.outputSelector.currentNode())
+            self.undoButtonBP.enabled = True
+
         finally:
             qt.QApplication.restoreOverrideCursor()
 
@@ -266,6 +280,8 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
             qt.QApplication.setOverrideCursor(qt.Qt.WaitCursor)
 
             self.logic.iterateFirstPass(100, self.outputSelector.currentNode())
+            self.undoButtonBP.enabled = True
+
         finally:
             qt.QApplication.restoreOverrideCursor()
 
@@ -275,6 +291,7 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
             qt.QApplication.setOverrideCursor(qt.Qt.WaitCursor)
 
             self.logic.iterateFirstPass(500, self.outputSelector.currentNode())
+            self.undoButtonBP.enabled = True
 
         finally:
             qt.QApplication.restoreOverrideCursor()
@@ -294,7 +311,7 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
 
     def onIncrement10Button(self):
         self.logic.iterateSecondPass(10, self.outputSelector.currentNode())
-        self.undoButton.enabled = True
+        self.undoButtonLeaflet.enabled = True
 
     def onIncrement50Button(self):
         try:
@@ -302,7 +319,7 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
             qt.QApplication.setOverrideCursor(qt.Qt.WaitCursor)
 
             self.logic.iterateSecondPass(50, self.outputSelector.currentNode())
-            self.undoButton.enabled = True
+            self.undoButtonLeaflet.enabled = True
 
         finally:
             qt.QApplication.restoreOverrideCursor()
@@ -313,20 +330,31 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
             qt.QApplication.setOverrideCursor(qt.Qt.WaitCursor)
 
             self.logic.iterateSecondPass(200, self.outputSelector.currentNode())
-            self.undoButton.enabled = True
+            self.undoButtonLeaflet.enabled = True
 
         finally:
             qt.QApplication.restoreOverrideCursor()
 
-    def onUndoButton(self):
-        self.logic.undoIteration(self.outputSelector.currentNode())
-        self.redoButton.enabled = True
-        self.undoButton.enabled = False
+    def onUndoButtonBP(self):
+        self.logic.undoBPIteration(self.outputSelector.currentNode())
+        self.redoButtonBP.enabled = True
+        self.undoButtonBP.enabled = False
 
-    def onRedoButton(self):
-        self.logic.redoIteration(self.outputSelector.currentNode())
-        self.redoButton.enabled = False
-        self.undoButton.enabled = True
+    def onRedoButtonBP(self):
+        self.logic.redoBPIteration(self.outputSelector.currentNode())
+        self.redoButtonBP.enabled = False
+        self.undoButtonBP.enabled = True
+
+    def onUndoButtonLeaflet(self):
+        self.logic.undoLeafletIteration(self.outputSelector.currentNode())
+        self.redoButtonLeaflet.enabled = True
+        self.undoButtonLeaflet.enabled = False
+
+    def onRedoButtonLeaflet(self):
+        self.logic.redoLeafletIteration(self.outputSelector.currentNode())
+        self.redoButtonLeaflet.enabled = False
+        self.undoButtonLeaflet.enabled = True
+
 
 
 #
@@ -349,8 +377,10 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         self._levelSet = None
         self._bpLevelSet = None
 
-        self._prevLevelSet = None
-        self._nextLevelSet = None
+        self._nextBpLevelSet = None
+        self._prevBpLevelSet = None
+        self._prevLeafletLevelSet = None
+        self._nextLeafletLevelSet = None
 
     def hasImageData(self, volumeNode):
         """This is an example logic method that
@@ -428,13 +458,13 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         blurFilter = sitk.DiscreteGaussianImageFilter()
         blurFilter.SetMaximumError(0.25)
-        blurFilter.SetMaximumKernelWidth(64)
-        blurFilter.SetUseImageSpacing(False)
-        blurFilter.SetVariance(5)
+        blurFilter.SetMaximumKernelWidth(32)
+        blurFilter.SetUseImageSpacing(True)
+        blurFilter.SetVariance(1.5)
         speedImg = blurFilter.Execute(speedImg)
 
         gradMag = sitk.GradientMagnitudeImageFilter()
-        gradMag.SetUseImageSpacing(False)
+        gradMag.SetUseImageSpacing(True)
         speedImg = gradMag.Execute(speedImg)
 
         sigmoid = sitk.SigmoidImageFilter()
@@ -445,6 +475,8 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         speedImg = sigmoid.Execute(speedImg)
 
         self._speedImg = speedImg
+
+        #sitkUtils.PushVolumeToSlicer(speedImg)
 
         # compute initial level set
         levelSet = sitkUtils.PullVolumeFromSlicer(inputMask)
@@ -457,11 +489,11 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         # goal is to find middle ground values that work for most cases
         # could try simplified parameters aimed at fixing leaks/too small and adjust real parameters as needed here
         geodesicActiveContour = sitk.GeodesicActiveContourLevelSetImageFilter()
-        geodesicActiveContour.SetCurvatureScaling(2.7)
-        geodesicActiveContour.SetAdvectionScaling(0.8)
-        geodesicActiveContour.SetPropagationScaling(3)
+        geodesicActiveContour.SetCurvatureScaling(0.8)
+        geodesicActiveContour.SetAdvectionScaling(1.2)
+        geodesicActiveContour.SetPropagationScaling(1.0)
         geodesicActiveContour.SetMaximumRMSError(0.0001)
-        geodesicActiveContour.SetNumberOfIterations(1000)
+        geodesicActiveContour.SetNumberOfIterations(500)
 
         out_mask = geodesicActiveContour.Execute(levelSet, speedImg)
         print(geodesicActiveContour.GetElapsedIterations())
@@ -479,15 +511,16 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
     def iterateFirstPass(self, nIter, outputVolume):
         geodesicActiveContour = sitk.GeodesicActiveContourLevelSetImageFilter()
-        geodesicActiveContour.SetCurvatureScaling(2.7)
-        geodesicActiveContour.SetAdvectionScaling(0.9)
-        geodesicActiveContour.SetPropagationScaling(1.8)
+        geodesicActiveContour.SetCurvatureScaling(1.2)
+        geodesicActiveContour.SetAdvectionScaling(1.0)
+        geodesicActiveContour.SetPropagationScaling(0.9)
         geodesicActiveContour.SetMaximumRMSError(0.00001)
         geodesicActiveContour.SetNumberOfIterations(nIter)
 
         out_mask = geodesicActiveContour.Execute(self._bpLevelSet, self._speedImg)
         print(geodesicActiveContour.GetElapsedIterations())
 
+        self._prevBpLevelSet = self._bpLevelSet
         self._bpLevelSet = out_mask
 
         threshold = sitk.BinaryThresholdImageFilter()
@@ -516,7 +549,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         distThreshold.SetInsideValue(1)
         distThreshold.SetLowerThreshold(-5)
         distThreshold.SetOutsideValue(0)
-        distThreshold.SetUpperThreshold(13)
+        distThreshold.SetUpperThreshold(11)
         leafletMask = distThreshold.Execute(distMap)
 
         # Run second pass to get final leaflet segmentation
@@ -524,9 +557,9 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         levelSet = signedDis.Execute(leafletMask)
 
         geodesicActiveContour2 = sitk.GeodesicActiveContourLevelSetImageFilter()
-        geodesicActiveContour2.SetCurvatureScaling(0.8)
+        geodesicActiveContour2.SetCurvatureScaling(1.0)
         geodesicActiveContour2.SetAdvectionScaling(0.1)
-        geodesicActiveContour2.SetPropagationScaling(-0.4)
+        geodesicActiveContour2.SetPropagationScaling(-0.6)
         geodesicActiveContour2.SetMaximumRMSError(0.0001)
         geodesicActiveContour2.SetNumberOfIterations(500)
         out_mask = geodesicActiveContour2.Execute(levelSet, self._speedImg)
@@ -549,14 +582,14 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
     def iterateSecondPass(self, nIter, outputVolumeNode):
 
         geodesicActiveContour2 = sitk.GeodesicActiveContourLevelSetImageFilter()
-        geodesicActiveContour2.SetCurvatureScaling(0.8)
+        geodesicActiveContour2.SetCurvatureScaling(0.9)
         geodesicActiveContour2.SetAdvectionScaling(0.1)
         geodesicActiveContour2.SetPropagationScaling(-0.4)
         geodesicActiveContour2.SetMaximumRMSError(0.0001)
         geodesicActiveContour2.SetNumberOfIterations(nIter)
         out_mask = geodesicActiveContour2.Execute(self._levelSet, self._speedImg)
 
-        self._prevLevelSet = self._levelSet
+        self._prevLeafletLevelSet = self._levelSet
         self._levelSet = out_mask
 
         print(geodesicActiveContour2.GetElapsedIterations())
@@ -572,10 +605,34 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         return out_mask
 
-    def undoIteration(self, outputVolumeNode):
+    def undoBPIteration(self, outputVolumeNode):
+        self._nextBpLevelSet = self._bpLevelSet
+        self._bpLevelSet = self._prevBpLevelSet
 
-        self._nextLevelSet = self._levelSet
-        self._levelSet = self._prevLevelSet
+        threshold = sitk.BinaryThresholdImageFilter()
+        threshold.SetInsideValue(1)
+        threshold.SetLowerThreshold(-1000.0)
+        threshold.SetOutsideValue(0)
+        threshold.SetUpperThreshold(0.0)
+
+        self.pushITKImageToSegmentation(threshold.Execute(self._bpLevelSet), outputVolumeNode, 'BP Segmentation')
+
+
+    def redoBPIteration(self, outputVolumeNode):
+        self._prevBpLevelSet = self._bpLevelSet
+        self._bpLevelSet = self._nextBpLevelSet
+
+        threshold = sitk.BinaryThresholdImageFilter()
+        threshold.SetInsideValue(1)
+        threshold.SetLowerThreshold(-1000.0)
+        threshold.SetOutsideValue(0)
+        threshold.SetUpperThreshold(0.0)
+
+        self.pushITKImageToSegmentation(threshold.Execute(self._bpLevelSet), outputVolumeNode, 'BP Segmentation')
+
+    def undoLeafletIteration(self, outputVolumeNode):
+        self._nextLeafletLevelSet = self._levelSet
+        self._levelSet = self._prevLeafletLevelSet
 
         threshold = sitk.BinaryThresholdImageFilter()
         threshold.SetInsideValue(1)
@@ -587,10 +644,9 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         return self._levelSet
 
-    def redoIteration(self, outputVolumeNode):
-
-        self._prevLevelSet = self._levelSet
-        self._levelSet = self._nextLevelSet
+    def redoLeafletIteration(self, outputVolumeNode):
+        self._prevLeafletLevelSet = self._levelSet
+        self._levelSet = self._nextLeafletLevelSet
 
         threshold = sitk.BinaryThresholdImageFilter()
         threshold.SetInsideValue(1)
