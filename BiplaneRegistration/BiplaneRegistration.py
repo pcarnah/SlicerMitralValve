@@ -263,7 +263,7 @@ class BiplaneRegistrationWidget(ScriptedLoadableModuleWidget, VTKObservationMixi
         self.rotationSliders.update()
 
     def onInitTransformButton(self):
-        self.logic.initVolumes(self.inputSelectorBiPlane.currentNode(), None, self.outputSelector2.currentNode(),
+        self.logic.initVolumes(self.inputSelectorBiPlane.currentNode(), self.inputSelectorFixed.currentNode(), self.outputSelector2.currentNode(),
                                self.outputSelector.currentNode())
 
         self.logic.initTransform(self.inputSelectorFixed.currentNode(), self.outputSelector.currentNode(),
