@@ -12,4 +12,4 @@ Loadable module prototyping a manual segmentation/modelling process in Slicer.
 
 ## MVSegmenter
 
-Scripted module implementing automatix mitral valve segmentation using ITK.
+Scripted module implementing automatic mitral valve segmentation using ITK. Depends on HeartValveLib from the Slicer Heart extension.

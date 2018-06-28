@@ -4,6 +4,8 @@ import vtk, qt, ctk, slicer
 import SimpleITK as sitk
 import sitkUtils
 from slicer.ScriptedLoadableModule import *
+import HeartValveLib
+import numpy as np
 import logging
 
 
@@ -63,6 +65,23 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         parametersFormLayout = qt.QFormLayout(parametersCollapsibleButton)
 
         #
+        #   Heart valve node selector
+        #
+        self.heartValveSelector = slicer.qMRMLNodeComboBox()
+        self.heartValveSelector.nodeTypes = ["vtkMRMLScriptedModuleNode"]
+        self.heartValveSelector.setNodeTypeLabel("HeartValve", "vtkMRMLScriptedModuleNode")
+        self.heartValveSelector.baseName = "HeartValve"
+        self.heartValveSelector.addAttribute("vtkMRMLScriptedModuleNode", "ModuleName", "HeartValve")
+        self.heartValveSelector.addEnabled = False
+        self.heartValveSelector.removeEnabled = True
+        self.heartValveSelector.noneEnabled = False
+        self.heartValveSelector.showHidden = True  # scripted module nodes are hidden by default
+        self.heartValveSelector.renameEnabled = True
+        self.heartValveSelector.setMRMLScene(slicer.mrmlScene)
+        self.heartValveSelector.setToolTip("Select heart valve node where annulus was defined")
+        parametersFormLayout.addRow("Heart valve: ", self.heartValveSelector)
+
+        #
         # input volume selector
         #
         self.inputSelector = slicer.qMRMLNodeComboBox()
@@ -76,21 +95,6 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         self.inputSelector.setMRMLScene(slicer.mrmlScene)
         self.inputSelector.setToolTip("Pick the input to the algorithm.")
         parametersFormLayout.addRow("Input Volume", self.inputSelector)
-
-        #
-        # input mask selector
-        #
-        self.inputMask = slicer.qMRMLNodeComboBox()
-        self.inputMask.nodeTypes = ["vtkMRMLLabelMapVolumeNode"]
-        self.inputMask.selectNodeUponCreation = True
-        self.inputMask.addEnabled = True
-        self.inputMask.removeEnabled = False
-        self.inputMask.noneEnabled = False
-        self.inputMask.showHidden = False
-        self.inputMask.showChildNodeTypes = False
-        self.inputMask.setMRMLScene(slicer.mrmlScene)
-        self.inputMask.setToolTip("Pick the input to the algorithm.")
-        parametersFormLayout.addRow("Input Mask", self.inputMask)
 
         #
         # output segmentation selector
@@ -240,8 +244,8 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         self.undoButtonLeaflet.connect('clicked(bool)', self.onUndoButtonLeaflet)
         self.redoButtonLeaflet.connect('clicked(bool)', self.onRedoButtonLeaflet)
 
+        self.heartValveSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onSelect)
         self.inputSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onSelect)
-        self.inputMask.connect("currentNodeChanged(vtkMRMLNode*)", self.onSelect)
         self.outputSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onSelect)
 
         # Add vertical spacer
@@ -254,7 +258,7 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         pass
 
     def onSelect(self):
-        self.initBPButton.enabled = self.inputSelector.currentNode() and self.inputMask.currentNode() and self.outputSelector.currentNode()
+        self.initBPButton.enabled = self.heartValveSelector.currentNode() and self.inputSelector.currentNode() and self.outputSelector.currentNode()
 
     def onInitBPButton(self):
         try:
@@ -262,7 +266,7 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
             qt.QApplication.setOverrideCursor(qt.Qt.WaitCursor)
 
             enableScreenshotsFlag = self.enableScreenshotsFlagCheckBox.checked
-            self.logic.initBPSeg(self.inputSelector.currentNode(), self.inputMask.currentNode(),
+            self.logic.initBPSeg(self.inputSelector.currentNode(), self.heartValveSelector.currentNode(),
                                  self.outputSelector.currentNode())
             self.incrementFirstButton50.enabled = True
             self.incrementFirstButton100.enabled = True
@@ -456,10 +460,23 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         annotationLogic = slicer.modules.annotations.logic()
         annotationLogic.CreateSnapShot(name, description, type, 1, imageData)
 
-    def initBPSeg(self, inputVolume, inputMask, outputVolume):
+    def initBPSeg(self, inputVolume, heartValveNode, outputSeg):
         """
         Run the actual algorithm
+        :param heartValveNode:
         """
+
+        if not inputVolume or not heartValveNode or not outputSeg:
+            logging.error("Missing parameter")
+            return
+
+        valveModel = HeartValveLib.getValveModel(heartValveNode)
+        if valveModel.getAnnulusContourMarkupNode().GetNumberOfFiducials() == 0:
+            logging.error("Annulus contour not defined")
+            return
+
+        if valveModel.getProbeToRasTransformNode():
+           outputSeg.SetAndObserveTransformNodeID(valveModel.getProbeToRasTransformNode().GetID())
 
         # calculate speed image from input volume
         # Uses DiscreteGaussian -> GradientMagnitude -> Sigmoid filters
@@ -485,18 +502,36 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         self._speedImg = speedImg
 
-        #sitkUtils.PushVolumeToSlicer(speedImg)
-
         # compute initial level set
-        levelSet = sitkUtils.PullVolumeFromSlicer(inputMask)
+
+        #Find annulus center
+        markups = valveModel.getAnnulusContourMarkupNode()
+        pos = np.zeros(3)
+        centroid = np.zeros(3)
+        for i in range(markups.GetNumberOfFiducials()):
+            markups.GetNthFiducialPosition(i, pos)
+            centroid += pos
+
+        centroid = centroid / markups.GetNumberOfFiducials()
+        centroid = centroid + valveModel.getAnnulusContourPlane()[1] * -10
+        centroid = np.array(self.rasToIJK(centroid, inputVolume))
+
+        #Run fast marching based on annulus center
+        fastMarching = sitk.FastMarchingImageFilter()
+        fastMarching.SetTrialPoints([centroid.astype('uint32').tolist()])
+        fmarch = fastMarching.Execute(speedImg)
+
+        thresh = sitk.BinaryThresholdImageFilter()
+        thresh.SetLowerThreshold(0)
+        thresh.SetUpperThreshold(10)
+        thresh.SetInsideValue(1)
+        thresh.SetOutsideValue(0)
+        mask = thresh.Execute(fmarch)
 
         signedDis = sitk.SignedDanielssonDistanceMapImageFilter()
-        levelSet = signedDis.Execute(levelSet)
+        levelSet = signedDis.Execute(mask)
 
         # Run first pass of geodesic active contour
-        # TODO adjust active contour parameters / make user entered as different image data may need different values to behave
-        # goal is to find middle ground values that work for most cases
-        # could try simplified parameters aimed at fixing leaks/too small and adjust real parameters as needed here
         geodesicActiveContour = sitk.GeodesicActiveContourLevelSetImageFilter()
         geodesicActiveContour.SetCurvatureScaling(0.8)
         geodesicActiveContour.SetAdvectionScaling(1.2)
@@ -516,9 +551,9 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         threshold.SetUpperThreshold(0.0)
         out_mask = threshold.Execute(out_mask)
 
-        self.pushITKImageToSegmentation(out_mask, outputVolume, 'BP Segmentation')
+        self.pushITKImageToSegmentation(out_mask, outputSeg, 'BP Segmentation')
 
-    def iterateFirstPass(self, nIter, outputVolume):
+    def iterateFirstPass(self, nIter, outputSeg):
         geodesicActiveContour = sitk.GeodesicActiveContourLevelSetImageFilter()
         geodesicActiveContour.SetCurvatureScaling(1.2)
         geodesicActiveContour.SetAdvectionScaling(1.0)
@@ -539,9 +574,9 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         threshold.SetUpperThreshold(0.0)
         out_mask = threshold.Execute(out_mask)
 
-        self.pushITKImageToSegmentation(out_mask, outputVolume, 'BP Segmentation')
+        self.pushITKImageToSegmentation(out_mask, outputSeg, 'BP Segmentation')
 
-    def initLeafletSeg(self, outputVolume):
+    def initLeafletSeg(self, outputSeg):
 
         # Get region bordering initial blood-pool segmentation
         threshold = sitk.BinaryThresholdImageFilter()
@@ -570,7 +605,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         geodesicActiveContour2.SetAdvectionScaling(0.1)
         geodesicActiveContour2.SetPropagationScaling(-0.6)
         geodesicActiveContour2.SetMaximumRMSError(0.0001)
-        geodesicActiveContour2.SetNumberOfIterations(500)
+        geodesicActiveContour2.SetNumberOfIterations(300)
         out_mask = geodesicActiveContour2.Execute(levelSet, self._speedImg)
 
         self._levelSet = out_mask
@@ -584,11 +619,11 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         print(geodesicActiveContour2.GetElapsedIterations())
 
-        self.pushITKImageToSegmentation(out_mask, outputVolume, 'Leaflet Segmentation')
+        self.pushITKImageToSegmentation(out_mask, outputSeg, 'Leaflet Segmentation')
 
         return out_mask
 
-    def iterateSecondPass(self, nIter, outputVolumeNode):
+    def iterateSecondPass(self, nIter, outputSeg):
 
         geodesicActiveContour2 = sitk.GeodesicActiveContourLevelSetImageFilter()
         geodesicActiveContour2.SetCurvatureScaling(0.9)
@@ -610,11 +645,11 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         threshold.SetUpperThreshold(0.0)
         out_mask = threshold.Execute(out_mask)
 
-        self.pushITKImageToSegmentation(out_mask, outputVolumeNode, 'Leaflet Segmentation')
+        self.pushITKImageToSegmentation(out_mask, outputSeg, 'Leaflet Segmentation')
 
         return out_mask
 
-    def undoBPIteration(self, outputVolumeNode):
+    def undoBPIteration(self, outputSeg):
         self._nextBpLevelSet = self._bpLevelSet
         self._bpLevelSet = self._prevBpLevelSet
 
@@ -624,10 +659,10 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         threshold.SetOutsideValue(0)
         threshold.SetUpperThreshold(0.0)
 
-        self.pushITKImageToSegmentation(threshold.Execute(self._bpLevelSet), outputVolumeNode, 'BP Segmentation')
+        self.pushITKImageToSegmentation(threshold.Execute(self._bpLevelSet), outputSeg, 'BP Segmentation')
 
 
-    def redoBPIteration(self, outputVolumeNode):
+    def redoBPIteration(self, outputSeg):
         self._prevBpLevelSet = self._bpLevelSet
         self._bpLevelSet = self._nextBpLevelSet
 
@@ -637,9 +672,9 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         threshold.SetOutsideValue(0)
         threshold.SetUpperThreshold(0.0)
 
-        self.pushITKImageToSegmentation(threshold.Execute(self._bpLevelSet), outputVolumeNode, 'BP Segmentation')
+        self.pushITKImageToSegmentation(threshold.Execute(self._bpLevelSet), outputSeg, 'BP Segmentation')
 
-    def undoLeafletIteration(self, outputVolumeNode):
+    def undoLeafletIteration(self, outputSeg):
         self._nextLeafletLevelSet = self._levelSet
         self._levelSet = self._prevLeafletLevelSet
 
@@ -649,11 +684,11 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         threshold.SetOutsideValue(0)
         threshold.SetUpperThreshold(0.0)
 
-        self.pushITKImageToSegmentation(threshold.Execute(self._levelSet), outputVolumeNode, 'Leaflet Segmentation')
+        self.pushITKImageToSegmentation(threshold.Execute(self._levelSet), outputSeg, 'Leaflet Segmentation')
 
         return self._levelSet
 
-    def redoLeafletIteration(self, outputVolumeNode):
+    def redoLeafletIteration(self, outputSeg):
         self._prevLeafletLevelSet = self._levelSet
         self._levelSet = self._nextLeafletLevelSet
 
@@ -663,7 +698,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         threshold.SetOutsideValue(0)
         threshold.SetUpperThreshold(0.0)
 
-        self.pushITKImageToSegmentation(threshold.Execute(self._levelSet), outputVolumeNode, 'Leaflet Segmentation')
+        self.pushITKImageToSegmentation(threshold.Execute(self._levelSet), outputSeg, 'Leaflet Segmentation')
 
         return self._levelSet
 
@@ -673,6 +708,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         # Create temporary label map node
         tempNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLabelMapVolumeNode', 'temp_labelmap')
+        tempNode.SetAndObserveTransformNodeID(segmentationNode.GetTransformNodeID())
         sitkUtils.PushVolumeToSlicer(img, tempNode)
 
         segmentationIds = vtk.vtkStringArray()
@@ -686,6 +722,16 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
     def exportSpeedImage(self):
         if self._speedImg is not None:
             sitkUtils.PushVolumeToSlicer(self._speedImg)
+
+    def rasToIJK(self, point, volume):
+        matrix = vtk.vtkMatrix4x4()
+        volume.GetRASToIJKMatrix(matrix)
+
+        homogeneousPoint = [point[0], point[1], point[2], 1]
+        outPoint = matrix.MultiplyPoint(homogeneousPoint)
+
+        return [outPoint[0], outPoint[1], outPoint[2]]
+
 
 
 class MVSegmenterTest(ScriptedLoadableModuleTest):
