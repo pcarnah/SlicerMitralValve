@@ -116,6 +116,11 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
             "If checked, take screen shots for tutorials. Use Save Data to write them to disk.")
         parametersFormLayout.addRow("Enable Screenshots", self.enableScreenshotsFlagCheckBox)
 
+        self.exportSpeedImageButton = qt.QPushButton("Export Speed Image")
+        self.exportSpeedImageButton.toolTip = "Export speed image to a new node"
+        self.exportSpeedImageButton.enabled = True
+        parametersFormLayout.addRow(self.exportSpeedImageButton)
+
         #
         #  First Phase Segmentation
         #
@@ -217,7 +222,10 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
 
         secondPassFormLayout.addRow("Increment Segmentation", incrementHBox)
 
+
         # connections
+        self.exportSpeedImageButton.connect('clicked(bool)', self.onExportSpeedImageButton)
+
         self.initBPButton.connect('clicked(bool)', self.onInitBPButton)
         self.incrementFirstButton50.connect('clicked(bool)', self.onIncrementFirst50Button)
         self.incrementFirstButton100.connect('clicked(bool)', self.onIncrementFirst100Button)
@@ -355,7 +363,8 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         self.redoButtonLeaflet.enabled = False
         self.undoButtonLeaflet.enabled = True
 
-
+    def onExportSpeedImageButton(self):
+        self.logic.exportSpeedImage()
 
 #
 # MVSegmenterLogic
@@ -547,7 +556,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         distThreshold = sitk.BinaryThresholdImageFilter()
         distThreshold.SetInsideValue(1)
-        distThreshold.SetLowerThreshold(-5)
+        distThreshold.SetLowerThreshold(1)
         distThreshold.SetOutsideValue(0)
         distThreshold.SetUpperThreshold(11)
         leafletMask = distThreshold.Execute(distMap)
@@ -673,6 +682,10 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
                                                                               segmentationIds)
 
         slicer.mrmlScene.RemoveNode(tempNode)
+
+    def exportSpeedImage(self):
+        if self._speedImg is not None:
+            sitkUtils.PushVolumeToSlicer(self._speedImg)
 
 
 class MVSegmenterTest(ScriptedLoadableModuleTest):
