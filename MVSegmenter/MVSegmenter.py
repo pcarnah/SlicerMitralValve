@@ -6,6 +6,7 @@ import sitkUtils
 from slicer.ScriptedLoadableModule import *
 import HeartValveLib
 import numpy as np
+import math
 import logging
 
 
@@ -461,7 +462,8 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
                                           self.markupsSelector.currentNode())
 
     def onExportModelButton(self):
-        self.logic.extractInnerSurfaceModel(self.outputSelector.currentNode(), self.modelSelector.currentNode())
+        self.logic.extractInnerSurfaceModel(self.outputSelector.currentNode(), self.heartValveSelector.currentNode(),
+                                            self.modelSelector.currentNode())
 
 #
 # MVSegmenterLogic
@@ -799,8 +801,13 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         if segmentationNode.GetSegmentation().GetSegmentIndex(segmentId) == -1:
             segmentationNode.GetSegmentation().AddEmptySegment(segmentId)
 
-        if segmentationNode.GetSegmentation().GetConversionParameter('Decimation factor') != '0.6':
-            segmentationNode.GetSegmentation().SetConversionParameter('Decimation factor', '0.6')
+        if segmentationNode.GetSegmentation().GetConversionParameter('Decimation factor') != '0.5':
+            segmentationNode.GetSegmentation().SetConversionParameter('Decimation factor', '0.5')
+            segmentationNode.RemoveClosedSurfaceRepresentation()
+            segmentationNode.CreateClosedSurfaceRepresentation()
+
+        if segmentationNode.GetSegmentation().GetConversionParameter('Smoothing factor') != '0.8':
+            segmentationNode.GetSegmentation().SetConversionParameter('Smoothing factor', '0.8')
             segmentationNode.RemoveClosedSurfaceRepresentation()
             segmentationNode.CreateClosedSurfaceRepresentation()
 
@@ -913,16 +920,26 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         return True
 
-    def extractInnerSurfaceModel(self, segNode, outModel):
-        if not segNode or not outModel:
+    def extractInnerSurfaceModel(self, segNode, heartValveNode, outModel):
+        if not segNode or not outModel or not heartValveNode:
             logging.error("Missing parameter")
             return
+
+        valveModel = HeartValveLib.getValveModel(heartValveNode)
+        if valveModel.getAnnulusContourMarkupNode().GetNumberOfFiducials() == 0:
+            logging.error("Annulus contour not defined")
+            return False
 
         bpModel = segNode.GetClosedSurfaceRepresentation('BP Segmentation')
         leafletModel = segNode.GetClosedSurfaceRepresentation('Leaflet Segmentation')
         if bpModel is None or leafletModel is None:
             logging.error("Missing segmentation")
             return
+
+        if not outModel.GetDisplayNodeID():
+            outModel.CreateDefaultDisplayNodes()
+
+        outModel.SetAndObserveTransformNodeID(segNode.GetTransformNodeID())
 
         obb = vtk.vtkOBBTree()
         obb.SetDataSet(bpModel)
@@ -931,6 +948,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         # Extract cells that use points where the normal intersects the bp segmentation
         a0 = np.zeros(3)
         n = np.zeros(3)
+        contourPlane = valveModel.getAnnulusContourPlane()
         ids = vtk.vtkIdList()
         cellids = vtk.vtkIdList()
         for i in range(leafletModel.GetNumberOfPoints()):
@@ -939,9 +957,10 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
             r = obb.IntersectWithLine(a0, a0 + n * 200, None, None)
             if r != 0:
-                leafletModel.GetPointCells(i, cellids)
-                for j in range(cellids.GetNumberOfIds()):
-                    index = ids.InsertUniqueId(cellids.GetId(j))
+                if a0[2] < contourPlane[0][2] or math.degrees(math.acos(np.dot(n, contourPlane[1]) / (np.linalg.norm(n) + np.linalg.norm(contourPlane[1])))) > 85:
+                    leafletModel.GetPointCells(i, cellids)
+                    for j in range(cellids.GetNumberOfIds()):
+                        index = ids.InsertUniqueId(cellids.GetId(j))
 
         # Convert vtkIdList to vtkIdTypeArray
         idsarray = vtk.vtkIdTypeArray()
@@ -967,16 +986,11 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         geom.SetInputConnection(extractSelection.GetOutputPort())
         geom.Update()
 
-        norm = vtk.vtkPolyDataNormals()
-        norm.FlipNormalsOn()
-        norm.SetInputConnection(geom.GetOutputPort())
-        norm.Update()
-
         extrude = vtk.vtkLinearExtrusionFilter()
         extrude.CappingOn()
-        extrude.SetExtrusionTypeToNormalExtrusion ()
-        extrude.SetScaleFactor(0.3)
-        extrude.SetInputConnection(norm.GetOutputPort())
+        extrude.SetExtrusionTypeToNormalExtrusion()
+        extrude.SetScaleFactor(0.01)
+        extrude.SetInputConnection(geom.GetOutputPort())
         extrude.Update()
 
         normAuto = vtk.vtkPolyDataNormals()
@@ -984,7 +998,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         normAuto.SetInputConnection(extrude.GetOutputPort())
         normAuto.Update()
 
-        outModel.SetAndObservePolyData(normAuto.GetOutput())
+        outModel.SetAndObserveMesh(normAuto.GetOutput())
 
 
 class MVSegmenterTest(ScriptedLoadableModuleTest):
