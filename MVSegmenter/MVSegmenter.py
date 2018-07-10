@@ -942,22 +942,19 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         outModel.SetAndObserveTransformNodeID(segNode.GetTransformNodeID())
 
         obb = vtk.vtkOBBTree()
-        obb.SetDataSet(bpModel)
+        obb.SetDataSet(leafletModel)
         obb.BuildLocator()
 
         # Extract cells that use points where the normal intersects the bp segmentation
         a0 = np.zeros(3)
-        n = np.zeros(3)
         contourPlane = valveModel.getAnnulusContourPlane()
+        points = vtk.vtkPoints()
         ids = vtk.vtkIdList()
         cellids = vtk.vtkIdList()
         for i in range(leafletModel.GetNumberOfPoints()):
             leafletModel.GetPoint(i, a0)
-            leafletModel.GetPointData().GetNormals().GetTuple(i, n)
-
-            r = obb.IntersectWithLine(a0, a0 + n * 200, None, None)
-            if r != 0:
-                if a0[2] < contourPlane[0][2] or math.degrees(math.acos(np.dot(n, contourPlane[1]) / (np.linalg.norm(n) + np.linalg.norm(contourPlane[1])))) > 85:
+            r = obb.IntersectWithLine(a0, contourPlane[0], points, None)
+            if points.GetNumberOfPoints() == 1:
                     leafletModel.GetPointCells(i, cellids)
                     for j in range(cellids.GetNumberOfIds()):
                         index = ids.InsertUniqueId(cellids.GetId(j))
@@ -991,19 +988,35 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         geom.SetInputConnection(conn.GetOutputPort())
         geom.Update()
 
+        fill = vtk.vtkFillHolesFilter()
+        fill.SetHoleSize(2)
+        fill.SetInputConnection(geom.GetOutputPort())
+        fill.Update()
+
         clean = vtk.vtkCleanPolyData()
-        clean.SetInputConnection(geom.GetOutputPort())
+        clean.SetInputConnection(fill.GetOutputPort())
         clean.Update()
+
+        normClean = vtk.vtkPolyDataNormals()
+        normClean.AutoOrientNormalsOn()
+        #normClean.FlipNormalsOn()
+        normClean.ConsistencyOn ()
+        normClean.SetInputConnection(clean.GetOutputPort())
+        normClean.Update()
 
         extrude = vtk.vtkLinearExtrusionFilter()
         extrude.CappingOn()
-        extrude.SetExtrusionTypeToNormalExtrusion()
-        extrude.SetScaleFactor(0.01)
-        extrude.SetInputConnection(clean.GetOutputPort())
+        extrude.SetExtrusionTypeToPointExtrusion()
+        extrude.SetScaleFactor(-0.5)
+        extrude.SetExtrusionPoint(contourPlane[0])
+        extrude.SetInputConnection(normClean.GetOutputPort())
         extrude.Update()
 
         normAuto = vtk.vtkPolyDataNormals()
         normAuto.AutoOrientNormalsOn()
+        normAuto.SetFeatureAngle(30)
+        normAuto.SplittingOn()
+        normAuto.ConsistencyOn ()
         normAuto.SetInputConnection(extrude.GetOutputPort())
         normAuto.Update()
 
