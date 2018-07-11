@@ -124,11 +124,6 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
             "If checked, take screen shots for tutorials. Use Save Data to write them to disk.")
         parametersFormLayout.addRow("Enable Screenshots", self.enableScreenshotsFlagCheckBox)
 
-        self.exportSpeedImageButton = qt.QPushButton("Export Speed Image")
-        self.exportSpeedImageButton.toolTip = "Export speed image to a new node"
-        self.exportSpeedImageButton.enabled = True
-        parametersFormLayout.addRow(self.exportSpeedImageButton)
-
         # Add vertical spacer
         self.layout.addSpacing(vSpace)
 
@@ -307,8 +302,6 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
 
 
         # connections
-        self.exportSpeedImageButton.connect('clicked(bool)', self.onExportSpeedImageButton)
-
         self.initBPButton.connect('clicked(bool)', self.onInitBPButton)
         self.incrementFirstButton50.connect('clicked(bool)', self.onIncrementFirst50Button)
         self.incrementFirstButton100.connect('clicked(bool)', self.onIncrementFirst100Button)
@@ -453,9 +446,6 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         self.logic.redoLeafletIteration(self.outputSelector.currentNode())
         self.redoButtonLeaflet.enabled = False
         self.undoButtonLeaflet.enabled = True
-
-    def onExportSpeedImageButton(self):
-        self.logic.exportSpeedImage()
 
     def onGenerateSurfaceMarkups(self):
         success = self.logic.generateSurfaceMarkups(self.outputSelector.currentNode(), self.heartValveSelector.currentNode(),
@@ -824,10 +814,6 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         slicer.mrmlScene.RemoveNode(tempNode)
 
-    def exportSpeedImage(self):
-        if self._speedImg is not None:
-            sitkUtils.PushVolumeToSlicer(self._speedImg)
-
     def rasToIJK(self, point, volume):
         matrix = vtk.vtkMatrix4x4()
         volume.GetRASToIJKMatrix(matrix)
@@ -835,7 +821,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         homogeneousPoint = [point[0], point[1], point[2], 1]
         outPoint = matrix.MultiplyPoint(homogeneousPoint)
 
-        return [outPoint[0], outPoint[1], outPoint[2]]
+        return outPoint[0:3]
 
 
     def generateSurfaceMarkups(self, segNode, heartValveNode, markupsNode):
@@ -848,14 +834,13 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
             logging.error("Annulus contour not defined")
             return False
 
-        bpModel = segNode.GetClosedSurfaceRepresentation('BP Segmentation')
         leafletModel = segNode.GetClosedSurfaceRepresentation('Leaflet Segmentation')
-        if bpModel is None or leafletModel is None:
+        if leafletModel is None:
             logging.error("Missing segmentation")
             return False
 
         obb = vtk.vtkOBBTree()
-        obb.SetDataSet(bpModel)
+        obb.SetDataSet(leafletModel)
         obb.BuildLocator()
 
         markupsNode.RemoveAllMarkups()
@@ -868,19 +853,19 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         fixedMarkupsNode.RemoveAllMarkups()
 
-        markups = valveModel.getAnnulusContourMarkupNode()
-
+        # Get points from leaflet model where line from point to annulus center does not self intersect
         a0 = np.zeros(3)
-        n = np.zeros(3)
+        contourPlane = valveModel.getAnnulusContourPlane()
+        points = vtk.vtkPoints()
         ids = vtk.vtkIdTypeArray()
         for i in range(leafletModel.GetNumberOfPoints()):
             leafletModel.GetPoint(i, a0)
-            leafletModel.GetPointData().GetNormals().GetTuple(i, n)
-
-            r = obb.IntersectWithLine(a0, a0 + n * 200, None, None)
-            if r != 0:
+            r = obb.IntersectWithLine(a0, contourPlane[0], points, None)
+            # If only 1 intersection point, line does not cross through leaflet model as the line always intersects at a0
+            if points.GetNumberOfPoints() == 1:
                 index = ids.InsertNextValue(i)
 
+        # Extract the points lying on the inside of the model
         selectionNode = vtk.vtkSelectionNode()
         selectionNode.SetFieldType(vtk.vtkSelectionNode.POINT)
         selectionNode.SetContentType(vtk.vtkSelectionNode.INDICES)
@@ -898,11 +883,13 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         geom.SetInputConnection(extractSelection.GetOutputPort())
         geom.Update()
 
+        # Cleaner ensures points are spaced out evenly
         cleaner = vtk.vtkCleanPolyData()
         cleaner.SetTolerance(0.07)
         cleaner.SetInputConnection(geom.GetOutputPort())
         cleaner.Update()
 
+        # Populate markups node with model points
         mNodeModifyState = markupsNode.StartModify()
         fNodeModifyState = fixedMarkupsNode.StartModify()
         points = cleaner.GetOutput().GetPoints()
@@ -930,9 +917,8 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
             logging.error("Annulus contour not defined")
             return False
 
-        bpModel = segNode.GetClosedSurfaceRepresentation('BP Segmentation')
         leafletModel = segNode.GetClosedSurfaceRepresentation('Leaflet Segmentation')
-        if bpModel is None or leafletModel is None:
+        if leafletModel is None:
             logging.error("Missing segmentation")
             return
 
@@ -942,22 +928,20 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         outModel.SetAndObserveTransformNodeID(segNode.GetTransformNodeID())
 
         obb = vtk.vtkOBBTree()
-        obb.SetDataSet(bpModel)
+        obb.SetDataSet(leafletModel)
         obb.BuildLocator()
 
-        # Extract cells that use points where the normal intersects the bp segmentation
+        # Extract cells that use points where the line from the point to the annulus contour centroid does not self intersect
         a0 = np.zeros(3)
-        n = np.zeros(3)
         contourPlane = valveModel.getAnnulusContourPlane()
+        points = vtk.vtkPoints()
         ids = vtk.vtkIdList()
         cellids = vtk.vtkIdList()
         for i in range(leafletModel.GetNumberOfPoints()):
             leafletModel.GetPoint(i, a0)
-            leafletModel.GetPointData().GetNormals().GetTuple(i, n)
-
-            r = obb.IntersectWithLine(a0, a0 + n * 200, None, None)
-            if r != 0:
-                if a0[2] < contourPlane[0][2] or math.degrees(math.acos(np.dot(n, contourPlane[1]) / (np.linalg.norm(n) + np.linalg.norm(contourPlane[1])))) > 85:
+            r = obb.IntersectWithLine(a0, contourPlane[0], points, None)
+            # If only 1 intersection point, line does not cross through leaflet model as the line always intersects at a0
+            if points.GetNumberOfPoints() == 1:
                     leafletModel.GetPointCells(i, cellids)
                     for j in range(cellids.GetNumberOfIds()):
                         index = ids.InsertUniqueId(cellids.GetId(j))
@@ -981,20 +965,49 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         extractSelection.SetInputData(1, selection)
         extractSelection.Update()
 
+        # Keep only largest connected region (removes small spurious sections disconnected from rest)
+        conn = vtk.vtkConnectivityFilter()
+        conn.SetExtractionModeToLargestRegion()
+        conn.SetInputConnection(extractSelection.GetOutputPort())
+        conn.Update()
+
         # Convert back to polydata from unstructured grid
         geom = vtk.vtkGeometryFilter()
-        geom.SetInputConnection(extractSelection.GetOutputPort())
+        geom.SetInputConnection(conn.GetOutputPort())
         geom.Update()
 
+        # Fill small holes resulting from extraction and clean poly data
+        fill = vtk.vtkFillHolesFilter()
+        fill.SetHoleSize(2)
+        fill.SetInputConnection(geom.GetOutputPort())
+        fill.Update()
+
+        clean = vtk.vtkCleanPolyData()
+        clean.SetInputConnection(fill.GetOutputPort())
+        clean.Update()
+
+        # Fix normals before extrusion
+        normClean = vtk.vtkPolyDataNormals()
+        normClean.AutoOrientNormalsOn()
+        normClean.ConsistencyOn()
+        normClean.SetInputConnection(clean.GetOutputPort())
+        normClean.Update()
+
+        # Extrusion towards annulus centroid to thicken leaflet walls inwards
         extrude = vtk.vtkLinearExtrusionFilter()
         extrude.CappingOn()
-        extrude.SetExtrusionTypeToNormalExtrusion()
-        extrude.SetScaleFactor(0.01)
-        extrude.SetInputConnection(geom.GetOutputPort())
+        extrude.SetExtrusionTypeToPointExtrusion()
+        extrude.SetScaleFactor(-0.5)
+        extrude.SetExtrusionPoint(contourPlane[0])
+        extrude.SetInputConnection(normClean.GetOutputPort())
         extrude.Update()
 
+        # Make normals point outwards for final model
         normAuto = vtk.vtkPolyDataNormals()
         normAuto.AutoOrientNormalsOn()
+        normAuto.SetFeatureAngle(30)
+        normAuto.SplittingOn()
+        normAuto.ConsistencyOn()
         normAuto.SetInputConnection(extrude.GetOutputPort())
         normAuto.Update()
 
@@ -1031,26 +1044,4 @@ class MVSegmenterTest(ScriptedLoadableModuleTest):
         your test should break so they know that the feature is needed.
         """
 
-        self.delayDisplay("Starting the test")
-        #
-        # first, get some data
-        #
-        import urllib
-        downloads = (
-            ('http://slicer.kitware.com/midas3/download?items=5767', 'FA.nrrd', slicer.util.loadVolume),
-        )
-
-        for url, name, loader in downloads:
-            filePath = slicer.app.temporaryPath + '/' + name
-            if not os.path.exists(filePath) or os.stat(filePath).st_size == 0:
-                logging.info('Requesting download %s from %s...\n' % (name, url))
-                urllib.urlretrieve(url, filePath)
-            if loader:
-                logging.info('Loading %s...' % (name,))
-                loader(filePath)
-        self.delayDisplay('Finished with download and loading')
-
-        volumeNode = slicer.util.getNode(pattern="FA")
-        logic = MVSegmenterLogic()
-        self.assertIsNotNone(logic.hasImageData(volumeNode))
-        self.delayDisplay('Test passed!')
+        self.delayDisplay("No tests are implemented")
