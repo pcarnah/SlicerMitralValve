@@ -19,9 +19,9 @@ class BiplaneRegistration(ScriptedLoadableModule):
     def __init__(self, parent):
         ScriptedLoadableModule.__init__(self, parent)
         self.parent.title = "Biplane Registration" #
-        self.parent.categories = ["Examples"]
+        self.parent.categories = ["Cardiac"]
         self.parent.dependencies = []
-        self.parent.contributors = ["Patrick Carnahan (Robarts Research Institute)"] # replace with "Firstname Lastname (Organization)"
+        self.parent.contributors = ["Patrick Carnahan (Robarts Research Institute)"]
         self.parent.helpText = """
 This is a module that allows a philips bi-plane image exported as jpg to be converted and registered in 3D space.
 """
@@ -163,6 +163,8 @@ class BiplaneRegistrationWidget(ScriptedLoadableModuleWidget, VTKObservationMixi
         # Auto Registration Section
         #
         ###############################################################################################################
+        
+        # TODO Some form of user guided auto registration using annulus
         parametersCollapsibleButton = ctk.ctkCollapsibleButton()
         parametersCollapsibleButton.text = "Auto Register"
         self.layout.addWidget(parametersCollapsibleButton)
@@ -193,6 +195,8 @@ class BiplaneRegistrationWidget(ScriptedLoadableModuleWidget, VTKObservationMixi
         # Edit Transform Section
         #
         ###############################################################################################################
+        
+        # TODO Flip button for flipped volumes
         editCollapsibleButton = ctk.ctkCollapsibleButton()
         editCollapsibleButton.text = "Edit Transform"
         self.layout.addWidget(editCollapsibleButton)

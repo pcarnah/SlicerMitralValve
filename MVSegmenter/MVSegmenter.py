@@ -22,7 +22,7 @@ class MVSegmenter(ScriptedLoadableModule):
     def __init__(self, parent):
         ScriptedLoadableModule.__init__(self, parent)
         self.parent.title = "Mitral Valve Segmenter"
-        self.parent.categories = ["Examples"]
+        self.parent.categories = ["Cardiac"]
         self.parent.dependencies = []
         self.parent.contributors = [
             "Patrick Carnahan (Robarts Research Institute)"]
@@ -277,7 +277,7 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
 
         exportModelFormLayout = qt.QFormLayout(exportModelCollapsibleButton)
 
-        # Output Model Selector
+        # Output Leaflet Model Selector
         self.modelSelector = slicer.qMRMLNodeComboBox()
         self.modelSelector.nodeTypes = ["vtkMRMLModelNode"]
         self.modelSelector.selectNodeUponCreation = True
@@ -289,7 +289,21 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         self.modelSelector.showChildNodeTypes = False
         self.modelSelector.setMRMLScene(slicer.mrmlScene)
         self.modelSelector.setToolTip("Pick the model node to export to.")
-        exportModelFormLayout.addRow('Output Model Node', self.modelSelector)
+        exportModelFormLayout.addRow('Output Leaflet Model Node', self.modelSelector)
+
+        # Output Annulus Model Selector
+        self.annulusModelSelector = slicer.qMRMLNodeComboBox()
+        self.annulusModelSelector.nodeTypes = ["vtkMRMLModelNode"]
+        self.annulusModelSelector.selectNodeUponCreation = True
+        self.annulusModelSelector.addEnabled = True
+        self.annulusModelSelector.removeEnabled = False
+        self.annulusModelSelector.renameEnabled = True
+        self.annulusModelSelector.noneEnabled = False
+        self.annulusModelSelector.showHidden = False
+        self.annulusModelSelector.showChildNodeTypes = False
+        self.annulusModelSelector.setMRMLScene(slicer.mrmlScene)
+        self.annulusModelSelector.setToolTip("Pick the model node to export the projected annulus to.")
+        exportModelFormLayout.addRow('Output Annulus Model Node', self.annulusModelSelector)
 
         # Export button
         self.exportModelButton = qt.QPushButton("Export Model")
@@ -299,7 +313,6 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
 
         # Add vertical spacer
         self.layout.addSpacing(vSpace)
-
 
         # connections
         self.initBPButton.connect('clicked(bool)', self.onInitBPButton)
@@ -324,6 +337,7 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         self.generateSurfaceMarkups.connect('clicked(bool)', self.onGenerateSurfaceMarkups)
 
         self.modelSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onSelect)
+        self.annulusModelSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onSelect)
         self.exportModelButton.connect('clicked(bool)', self.onExportModelButton)
 
         # Add vertical spacer
@@ -338,7 +352,8 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
     def onSelect(self):
         self.initBPButton.enabled = self.heartValveSelector.currentNode() and self.inputSelector.currentNode() and self.outputSelector.currentNode()
         self.generateSurfaceMarkups.enabled = self.heartValveSelector.currentNode() and self.outputSelector.currentNode() and self.markupsSelector.currentNode()
-        self.exportModelButton.enabled = self.outputSelector.currentNode() and self.modelSelector.currentNode()
+        self.exportModelButton.enabled = self.heartValveSelector.currentNode() and self.outputSelector.currentNode() \
+                                         and self.modelSelector.currentNode() and self.annulusModelSelector.currentNode()
 
     def onInitBPButton(self):
         try:
@@ -448,12 +463,14 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         self.undoButtonLeaflet.enabled = True
 
     def onGenerateSurfaceMarkups(self):
-        success = self.logic.generateSurfaceMarkups(self.outputSelector.currentNode(), self.heartValveSelector.currentNode(),
-                                          self.markupsSelector.currentNode())
+        success = self.logic.generateSurfaceMarkups(self.outputSelector.currentNode(),
+                                                    self.heartValveSelector.currentNode(),
+                                                    self.markupsSelector.currentNode())
 
     def onExportModelButton(self):
         self.logic.extractInnerSurfaceModel(self.outputSelector.currentNode(), self.heartValveSelector.currentNode(),
-                                            self.modelSelector.currentNode())
+                                            self.modelSelector.currentNode(), self.annulusModelSelector.currentNode())
+
 
 #
 # MVSegmenterLogic
@@ -561,7 +578,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
             return
 
         if valveModel.getProbeToRasTransformNode():
-           outputSeg.SetAndObserveTransformNodeID(valveModel.getProbeToRasTransformNode().GetID())
+            outputSeg.SetAndObserveTransformNodeID(valveModel.getProbeToRasTransformNode().GetID())
 
         # calculate speed image from input volume
         # Uses DiscreteGaussian -> GradientMagnitude -> Sigmoid filters
@@ -589,7 +606,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         # compute initial level set
 
-        #Find annulus center
+        # Find annulus center
         markups = valveModel.getAnnulusContourMarkupNode()
         pos = np.zeros(3)
         centroid = np.zeros(3)
@@ -601,7 +618,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         centroid = centroid + valveModel.getAnnulusContourPlane()[1] * -10
         centroid = np.array(self.rasToIJK(centroid, inputVolume))
 
-        #Run fast marching based on annulus center
+        # Run fast marching based on annulus center
         fastMarching = sitk.FastMarchingImageFilter()
         fastMarching.SetTrialPoints([centroid.astype('uint32').tolist()])
         fmarch = fastMarching.Execute(speedImg)
@@ -746,7 +763,6 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         self.pushITKImageToSegmentation(threshold.Execute(self._bpLevelSet), outputSeg, 'BP Segmentation')
 
-
     def redoBPIteration(self, outputSeg):
         self._prevBpLevelSet = self._bpLevelSet
         self._bpLevelSet = self._nextBpLevelSet
@@ -823,7 +839,6 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         return outPoint[0:3]
 
-
     def generateSurfaceMarkups(self, segNode, heartValveNode, markupsNode):
         if not segNode or not heartValveNode or not markupsNode:
             logging.error("Missing parameter")
@@ -848,7 +863,8 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         fixedMarkupsNode = markupsNode.GetNodeReference('fixedNodeRef')
         if not fixedMarkupsNode:
-            fixedMarkupsNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLMarkupsFiducialNode', markupsNode.GetName() + '-fixed')
+            fixedMarkupsNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLMarkupsFiducialNode',
+                                                                  markupsNode.GetName() + '-fixed')
             markupsNode.AddNodeReferenceID('fixedNodeRef', fixedMarkupsNode.GetID())
 
         fixedMarkupsNode.RemoveAllMarkups()
@@ -907,8 +923,8 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         return True
 
-    def extractInnerSurfaceModel(self, segNode, heartValveNode, outModel):
-        if not segNode or not outModel or not heartValveNode:
+    def extractInnerSurfaceModel(self, segNode, heartValveNode, outModel, outAnnulusModel):
+        if not segNode or not outModel or not heartValveNode or not outAnnulusModel:
             logging.error("Missing parameter")
             return
 
@@ -925,7 +941,11 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         if not outModel.GetDisplayNodeID():
             outModel.CreateDefaultDisplayNodes()
 
+        if not outAnnulusModel.GetDisplayNodeID():
+            outAnnulusModel.CreateDefaultDisplayNodes()
+
         outModel.SetAndObserveTransformNodeID(segNode.GetTransformNodeID())
+        outAnnulusModel.SetAndObserveTransformNodeID(segNode.GetTransformNodeID())
 
         obb = vtk.vtkOBBTree()
         obb.SetDataSet(leafletModel)
@@ -942,9 +962,9 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
             r = obb.IntersectWithLine(a0, contourPlane[0], points, None)
             # If only 1 intersection point, line does not cross through leaflet model as the line always intersects at a0
             if points.GetNumberOfPoints() == 1:
-                    leafletModel.GetPointCells(i, cellids)
-                    for j in range(cellids.GetNumberOfIds()):
-                        index = ids.InsertUniqueId(cellids.GetId(j))
+                leafletModel.GetPointCells(i, cellids)
+                for j in range(cellids.GetNumberOfIds()):
+                    index = ids.InsertUniqueId(cellids.GetId(j))
 
         # Convert vtkIdList to vtkIdTypeArray
         idsarray = vtk.vtkIdTypeArray()
@@ -988,7 +1008,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         # Fix normals before extrusion
         normClean = vtk.vtkPolyDataNormals()
-        normClean.AutoOrientNormalsOn()
+        normClean.FlipNormalsOn()
         normClean.ConsistencyOn()
         normClean.SetInputConnection(clean.GetOutputPort())
         normClean.Update()
@@ -1003,15 +1023,74 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         extrude.Update()
 
         # Make normals point outwards for final model
+        # TODO User button to manually flip if inverted for some reason
         normAuto = vtk.vtkPolyDataNormals()
         normAuto.AutoOrientNormalsOn()
-        normAuto.SetFeatureAngle(30)
+        normAuto.SetFeatureAngle(45)
         normAuto.SplittingOn()
         normAuto.ConsistencyOn()
         normAuto.SetInputConnection(extrude.GetOutputPort())
         normAuto.Update()
 
-        outModel.SetAndObserveMesh(normAuto.GetOutput())
+        innerModel = vtk.vtkPolyData()
+        innerModel.DeepCopy(normAuto.GetOutput())
+
+        outModel.SetAndObservePolyData(innerModel)
+
+        obb = vtk.vtkOBBTree()
+        obb.SetDataSet(innerModel)
+        obb.BuildLocator()
+
+        annulusMarkups = valveModel.getAnnulusContourMarkupNode()
+        pos = np.zeros(3)
+        points = vtk.vtkPoints()
+        projPoints = vtk.vtkPoints()
+        # Take center point below actual for better projection of annulus onto leaflet mold (by Olivia's judgement)
+        # Needs more feedback to fine tune or potentially slider selector
+        # TODO Slider with auto update for annulus projection
+        center = contourPlane[0] + -15 * contourPlane[1]
+        for i in range(annulusMarkups.GetNumberOfFiducials()):
+            annulusMarkups.GetNthFiducialPosition(i, pos)
+            r = obb.IntersectWithLine(pos + pos - center, center, points, None)
+            if r != 0:
+                projPoints.InsertNextPoint(points.GetPoint(0))
+
+        projPoints.InsertNextPoint(projPoints.GetPoint(0))
+        projPoints.InsertNextPoint(projPoints.GetPoint(1))
+
+        lines = vtk.vtkCellArray()
+        lines.InsertNextCell(projPoints.GetNumberOfPoints())
+        for i in range(projPoints.GetNumberOfPoints()):
+            lines.InsertCellPoint(i)
+
+        projContour = vtk.vtkPolyData()
+        projContour.SetPoints(projPoints)
+        projContour.SetLines(lines)
+
+        splineFilter = vtk.vtkSplineFilter()
+        splineFilter.SetNumberOfSubdivisions(500)
+        splineFilter.GetSpline().ClosedOn()
+        splineFilter.SetInputData(projContour)
+        splineFilter.Update()
+
+        tubeFilter = vtk.vtkTubeFilter()
+        tubeFilter.SetRadius(1)
+        tubeFilter.SetNumberOfSides(20)
+        tubeFilter.CappingOff()
+        tubeFilter.SetInputConnection(splineFilter.GetOutputPort())
+        tubeFilter.Update()
+
+        cleanTube = vtk.vtkCleanPolyData()
+        cleanTube.SetInputConnection(tubeFilter.GetOutputPort())
+        cleanTube.Update()
+
+        subtractFilter = vtk.vtkBooleanOperationPolyDataFilter()
+        subtractFilter.SetOperationToUnion()
+        subtractFilter.SetInputConnection(0, normAuto.GetOutputPort())
+        subtractFilter.SetInputConnection(1, cleanTube.GetOutputPort())
+        subtractFilter.Update()
+
+        outAnnulusModel.SetAndObservePolyData(cleanTube.GetOutput())
 
 
 class MVSegmenterTest(ScriptedLoadableModuleTest):
