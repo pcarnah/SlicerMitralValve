@@ -22,7 +22,7 @@ class MVSegmenter(ScriptedLoadableModule):
     def __init__(self, parent):
         ScriptedLoadableModule.__init__(self, parent)
         self.parent.title = "Mitral Valve Segmenter"
-        self.parent.categories = ["Examples"]
+        self.parent.categories = ["Cardiac"]
         self.parent.dependencies = []
         self.parent.contributors = [
             "Patrick Carnahan (Robarts Research Institute)"]
@@ -1023,6 +1023,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         extrude.Update()
 
         # Make normals point outwards for final model
+        # TODO User button to manually flip if inverted for some reason
         normAuto = vtk.vtkPolyDataNormals()
         normAuto.AutoOrientNormalsOn()
         normAuto.SetFeatureAngle(45)
@@ -1046,6 +1047,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         projPoints = vtk.vtkPoints()
         # Take center point below actual for better projection of annulus onto leaflet mold (by Olivia's judgement)
         # Needs more feedback to fine tune or potentially slider selector
+        # TODO Slider with auto update for annulus projection
         center = contourPlane[0] + -15 * contourPlane[1]
         for i in range(annulusMarkups.GetNumberOfFiducials()):
             annulusMarkups.GetNthFiducialPosition(i, pos)
