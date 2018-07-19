@@ -489,6 +489,8 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         self._prevLeafletLevelSet = None
         self._nextLeafletLevelSet = None
 
+        self.moldBasePlate = None
+
     def hasImageData(self, volumeNode):
         """This is an example logic method that
         returns true if the passed in volume
@@ -1120,13 +1122,14 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         contourPlane = valveModel.getAnnulusContourPlane()
 
-        # Read in base plate file
-        reader = vtk.vtkSTLReader()
-        reader.SetFileName(os.path.dirname(slicer.modules.mvsegmenter.path) + "/Resources/moldBasePlate.stl")
-        reader.Update()
+        if self.moldBasePlate is None:
+            # Read in base plate file
+            reader = vtk.vtkSTLReader()
+            reader.SetFileName(os.path.dirname(slicer.modules.mvsegmenter.path) + "/Resources/moldBasePlate.stl")
+            reader.Update()
 
-        basePlate = vtk.vtkPolyData()
-        basePlate.DeepCopy(reader.GetOutput())
+            self.moldBasePlate = vtk.vtkPolyData()
+            self.moldBasePlate.DeepCopy(reader.GetOutput())
 
         # Get AP plane bounds of base plate
         plane = vtk.vtkPlane()
@@ -1136,7 +1139,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         cutter = vtk.vtkCutter()
         cutter.SetCutFunction(plane)
 
-        cutter.SetInputData(basePlate)
+        cutter.SetInputData(self.moldBasePlate)
         cutter.Update()
         bounds = cutter.GetOutput().GetBounds()
 
@@ -1163,12 +1166,12 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         translate.Update()
 
         # Align base plate with annulus normal ([0,0,1] translated, find transform to align to annulus normal, pre apply)
+        ##
 
         transformFilter = vtk.vtkTransformFilter()
         transformFilter.SetTransform(translate)
-        transformFilter.SetInputData(0, basePlate)
+        transformFilter.SetInputData(0, self.moldBasePlate)
         transformFilter.Update()
-
 
         segNode.GetSegmentation().RemoveSegment('Mold_Base_Plate')
         segNode.GetSegmentation().AddEmptySegment('Mold_Base_Plate')
