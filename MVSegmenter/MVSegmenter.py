@@ -283,6 +283,12 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         self.generateMoldButton.enabled = False
         exportModelFormLayout.addRow(self.generateMoldButton)
 
+        # Generate base button
+        self.generateBasePlateButton = qt.QPushButton("Generate Base Plate")
+        self.generateBasePlateButton.toolTip = "Generate the mold base plate in the segmentation node."
+        self.generateBasePlateButton.enabled = False
+        exportModelFormLayout.addRow(self.generateBasePlateButton)
+
         # Add vertical spacer
         self.layout.addSpacing(vSpace)
 
@@ -309,6 +315,7 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         self.generateSurfaceMarkups.connect('clicked(bool)', self.onGenerateSurfaceMarkups)
 
         self.generateMoldButton.connect('clicked(bool)', self.onExportModelButton)
+        self.generateBasePlateButton.connect('clicked(bool)', self.onGenerateBasePlate)
 
         # Add vertical spacer
         self.layout.addStretch(1)
@@ -323,6 +330,7 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         self.initBPButton.enabled = self.heartValveSelector.currentNode() and self.inputSelector.currentNode() and self.outputSegmentationSelector.currentNode()
         self.generateSurfaceMarkups.enabled = self.heartValveSelector.currentNode() and self.outputSegmentationSelector.currentNode() and self.markupsSelector.currentNode()
         self.generateMoldButton.enabled = self.heartValveSelector.currentNode() and self.outputSegmentationSelector.currentNode()
+        self.generateBasePlateButton.enabled = self.heartValveSelector.currentNode() and self.outputSegmentationSelector.currentNode()
 
     def onInitBPButton(self):
         try:
@@ -437,7 +445,12 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
                                                     self.markupsSelector.currentNode())
 
     def onExportModelButton(self):
-        self.logic.extractInnerSurfaceModel(self.outputSegmentationSelector.currentNode(), self.heartValveSelector.currentNode())
+        self.logic.extractInnerSurfaceModel(self.outputSegmentationSelector.currentNode(),
+                                            self.heartValveSelector.currentNode())
+
+    def onGenerateBasePlate(self):
+        self.logic.generateBasePlate(self.outputSegmentationSelector.currentNode(),
+                                            self.heartValveSelector.currentNode())
 
 
 #
@@ -1073,6 +1086,107 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         segment.AddRepresentation(vtkSegmentationCore.vtkSegmentationConverter.GetSegmentationClosedSurfaceRepresentationName(),
                 annulusFittedModel)
 
+    def generateBasePlate(self, segNode, heartValveNode):
+        import vtkSegmentationCorePython as vtkSegmentationCore
+
+        if not segNode or not heartValveNode:
+            logging.error("Missing parameter")
+            return
+
+        valveModel = HeartValveLib.getValveModel(heartValveNode)
+        if valveModel.getAnnulusContourMarkupNode().GetNumberOfFiducials() == 0:
+            logging.error("Annulus contour not defined. See Valve Annulus Analysis.")
+            return
+
+        if valveModel.getAnnulusMarkupPositionByLabel('A') is None or valveModel.getAnnulusMarkupPositionByLabel('P') is None:
+            logging.error("Annulus points not defined. See Valve Quantification.")
+            return
+
+        moldModel = segNode.GetClosedSurfaceRepresentation('Inner_Surface_Mold')
+        if moldModel is None:
+            logging.error("Missing generated mold.")
+            return
+
+        contourPlane = valveModel.getAnnulusContourPlane()
+
+        # Read in base plate file
+        reader = vtk.vtkSTLReader()
+        reader.SetFileName(os.path.dirname(slicer.modules.mvsegmenter.path) + "/Resources/moldBasePlate.stl")
+        reader.Update()
+
+        basePlate = vtk.vtkPolyData()
+        basePlate.DeepCopy(reader.GetOutput())
+
+        # Get AP plane bounds of base plate
+        plane = vtk.vtkPlane()
+        plane.SetNormal(1,0,0)
+        plane.SetOrigin(0,0,0)
+
+        cutter = vtk.vtkCutter()
+        cutter.SetCutFunction(plane)
+
+        cutter.SetInputData(basePlate)
+        cutter.Update()
+        bounds = cutter.GetOutput().GetBounds()
+
+        basePlateAPPoints = vtk.vtkPoints()
+        basePlateAPPoints.InsertNextPoint(0, bounds[3], bounds[4])    # A
+        basePlateAPPoints.InsertNextPoint(0, bounds[2], bounds[4])    # P
+
+        # Get annulus A P points
+        annulusAPPoints = vtk.vtkPoints()
+        annulusAPPoints.InsertNextPoint(valveModel.getAnnulusMarkupPositionByLabel('A'))
+        annulusAPPoints.InsertNextPoint(valveModel.getAnnulusMarkupPositionByLabel('P'))
+
+        # Do best fit registration from base plate bounds to annulus A P points
+        landmarkReg = vtk.vtkLandmarkTransform()
+        landmarkReg.SetModeToRigidBody()
+        landmarkReg.SetSourceLandmarks(basePlateAPPoints)
+        landmarkReg.SetTargetLandmarks(annulusAPPoints)
+        landmarkReg.Update()
+
+        translate = vtk.vtkTransform()
+        translate.Translate(contourPlane[1] * -8)   # TODO make slider controlled, hard code for testing only
+        translate.PreMultiply()
+        translate.Concatenate(landmarkReg)
+        translate.Update()
+
+        transformFilter = vtk.vtkTransformFilter()
+        transformFilter.SetTransform(translate)
+        transformFilter.SetInputData(0, basePlate)
+        transformFilter.Update()
+
+
+        segNode.GetSegmentation().RemoveSegment('Mold_Base_Plate')
+        segNode.GetSegmentation().AddEmptySegment('Mold_Base_Plate')
+
+        segment = segNode.GetSegmentation().GetSegment('Mold_Base_Plate')
+        segment.AddRepresentation(
+            vtkSegmentationCore.vtkSegmentationConverter.GetSegmentationClosedSurfaceRepresentationName(),
+            transformFilter.GetOutput())
+
+
+        clippingPlane = vtk.vtkPlane()
+        clippingPlane.SetNormal(contourPlane[1])
+        clippingPlane.SetOrigin(contourPlane[0] + contourPlane[1] * -8)
+
+        clip = vtk.vtkClipPolyData()
+        clip.SetClipFunction(clippingPlane)
+        clip.SetInputData(moldModel)
+        clip.Update()
+
+        segNode.GetSegmentation().RemoveSegment('Clipped_Mold')
+        segNode.GetSegmentation().AddEmptySegment('Clipped_Mold')
+
+        segment = segNode.GetSegmentation().GetSegment('Clipped_Mold')
+        segment.AddRepresentation(
+            vtkSegmentationCore.vtkSegmentationConverter.GetSegmentationClosedSurfaceRepresentationName(),
+            clip.GetOutput())
+
+
+        # Sliders for manual fine tuning?
+
+        # Fill model
 
 
 class MVSegmenterTest(ScriptedLoadableModuleTest):
