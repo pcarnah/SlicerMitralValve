@@ -289,6 +289,17 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         self.generateBasePlateButton.enabled = False
         exportModelFormLayout.addRow(self.generateBasePlateButton)
 
+        self.basePlateDepthSlider = ctk.ctkSliderWidget()
+        self.basePlateDepthSlider.singleStep = 0.1
+        self.basePlateDepthSlider.pageStep = 1
+        self.basePlateDepthSlider.minimum = 0
+        self.basePlateDepthSlider.maximum = 20
+        self.basePlateDepthSlider.value = 10
+        self.basePlateDepthSlider.decimals = 1
+        self.basePlateDepthSlider.setToolTip("Adjust the depth of the base plate for the mold")
+        exportModelFormLayout.addRow("Base Plate Depth", self.basePlateDepthSlider)
+
+
         # Add vertical spacer
         self.layout.addSpacing(vSpace)
 
@@ -316,6 +327,7 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
 
         self.generateMoldButton.connect('clicked(bool)', self.onExportModelButton)
         self.generateBasePlateButton.connect('clicked(bool)', self.onGenerateBasePlate)
+        self.basePlateDepthSlider.connect('valueChanged(double)', self.onGenerateBasePlate)
 
         # Add vertical spacer
         self.layout.addStretch(1)
@@ -450,8 +462,7 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
 
     def onGenerateBasePlate(self):
         self.logic.generateBasePlate(self.outputSegmentationSelector.currentNode(),
-                                            self.heartValveSelector.currentNode())
-
+                                            self.heartValveSelector.currentNode(), float(self.basePlateDepthSlider.value))
 
 #
 # MVSegmenterLogic
@@ -1086,7 +1097,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         segment.AddRepresentation(vtkSegmentationCore.vtkSegmentationConverter.GetSegmentationClosedSurfaceRepresentationName(),
                 annulusFittedModel)
 
-    def generateBasePlate(self, segNode, heartValveNode):
+    def generateBasePlate(self, segNode, heartValveNode, depth):
         import vtkSegmentationCorePython as vtkSegmentationCore
 
         if not segNode or not heartValveNode:
@@ -1146,10 +1157,12 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         landmarkReg.Update()
 
         translate = vtk.vtkTransform()
-        translate.Translate(contourPlane[1] * -8)   # TODO make slider controlled, hard code for testing only
+        translate.Translate(contourPlane[1] * -1 * depth)
         translate.PreMultiply()
         translate.Concatenate(landmarkReg)
         translate.Update()
+
+        # Align base plate with annulus normal ([0,0,1] translated, find transform to align to annulus normal, pre apply)
 
         transformFilter = vtk.vtkTransformFilter()
         transformFilter.SetTransform(translate)
@@ -1164,24 +1177,6 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         segment.AddRepresentation(
             vtkSegmentationCore.vtkSegmentationConverter.GetSegmentationClosedSurfaceRepresentationName(),
             transformFilter.GetOutput())
-
-
-        clippingPlane = vtk.vtkPlane()
-        clippingPlane.SetNormal(contourPlane[1])
-        clippingPlane.SetOrigin(contourPlane[0] + contourPlane[1] * -8)
-
-        clip = vtk.vtkClipPolyData()
-        clip.SetClipFunction(clippingPlane)
-        clip.SetInputData(moldModel)
-        clip.Update()
-
-        segNode.GetSegmentation().RemoveSegment('Clipped_Mold')
-        segNode.GetSegmentation().AddEmptySegment('Clipped_Mold')
-
-        segment = segNode.GetSegmentation().GetSegment('Clipped_Mold')
-        segment.AddRepresentation(
-            vtkSegmentationCore.vtkSegmentationConverter.GetSegmentationClosedSurfaceRepresentationName(),
-            clip.GetOutput())
 
 
         # Sliders for manual fine tuning?
