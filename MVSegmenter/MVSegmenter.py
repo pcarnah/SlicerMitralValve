@@ -103,17 +103,17 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         #
         # output segmentation selector
         #
-        self.outputSelector = slicer.qMRMLNodeComboBox()
-        self.outputSelector.nodeTypes = ["vtkMRMLSegmentationNode"]
-        self.outputSelector.selectNodeUponCreation = True
-        self.outputSelector.addEnabled = True
-        self.outputSelector.removeEnabled = False
-        self.outputSelector.noneEnabled = True
-        self.outputSelector.showHidden = False
-        self.outputSelector.showChildNodeTypes = False
-        self.outputSelector.setMRMLScene(slicer.mrmlScene)
-        self.outputSelector.setToolTip("Pick the output to the algorithm.")
-        parametersFormLayout.addRow("Output Segmentation", self.outputSelector)
+        self.outputSegmentationSelector = slicer.qMRMLNodeComboBox()
+        self.outputSegmentationSelector.nodeTypes = ["vtkMRMLSegmentationNode"]
+        self.outputSegmentationSelector.selectNodeUponCreation = True
+        self.outputSegmentationSelector.addEnabled = True
+        self.outputSegmentationSelector.removeEnabled = False
+        self.outputSegmentationSelector.noneEnabled = True
+        self.outputSegmentationSelector.showHidden = False
+        self.outputSegmentationSelector.showChildNodeTypes = False
+        self.outputSegmentationSelector.setMRMLScene(slicer.mrmlScene)
+        self.outputSegmentationSelector.setToolTip("Pick the output to the algorithm.")
+        parametersFormLayout.addRow("Output Segmentation", self.outputSegmentationSelector)
 
         #
         # check box to trigger taking screen shots for later use in tutorials
@@ -270,46 +270,35 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         #
         #  Export Inner Surface Model
         #
-        exportModelCollapsibleButton = ctk.ctkCollapsibleButton()
-        exportModelCollapsibleButton.text = "Export Model"
-        exportModelCollapsibleButton.collapsed = True
-        self.layout.addWidget(exportModelCollapsibleButton)
+        generateSurfaceMoldCollapsibleButton = ctk.ctkCollapsibleButton()
+        generateSurfaceMoldCollapsibleButton.text = "Generate Mold"
+        generateSurfaceMoldCollapsibleButton.collapsed = True
+        self.layout.addWidget(generateSurfaceMoldCollapsibleButton)
 
-        exportModelFormLayout = qt.QFormLayout(exportModelCollapsibleButton)
-
-        # Output Leaflet Model Selector
-        self.modelSelector = slicer.qMRMLNodeComboBox()
-        self.modelSelector.nodeTypes = ["vtkMRMLModelNode"]
-        self.modelSelector.selectNodeUponCreation = True
-        self.modelSelector.addEnabled = True
-        self.modelSelector.removeEnabled = False
-        self.modelSelector.renameEnabled = True
-        self.modelSelector.noneEnabled = False
-        self.modelSelector.showHidden = False
-        self.modelSelector.showChildNodeTypes = False
-        self.modelSelector.setMRMLScene(slicer.mrmlScene)
-        self.modelSelector.setToolTip("Pick the model node to export to.")
-        exportModelFormLayout.addRow('Output Leaflet Model Node', self.modelSelector)
-
-        # Output Annulus Model Selector
-        self.annulusModelSelector = slicer.qMRMLNodeComboBox()
-        self.annulusModelSelector.nodeTypes = ["vtkMRMLModelNode"]
-        self.annulusModelSelector.selectNodeUponCreation = True
-        self.annulusModelSelector.addEnabled = True
-        self.annulusModelSelector.removeEnabled = False
-        self.annulusModelSelector.renameEnabled = True
-        self.annulusModelSelector.noneEnabled = False
-        self.annulusModelSelector.showHidden = False
-        self.annulusModelSelector.showChildNodeTypes = False
-        self.annulusModelSelector.setMRMLScene(slicer.mrmlScene)
-        self.annulusModelSelector.setToolTip("Pick the model node to export the projected annulus to.")
-        exportModelFormLayout.addRow('Output Annulus Model Node', self.annulusModelSelector)
+        exportModelFormLayout = qt.QFormLayout(generateSurfaceMoldCollapsibleButton)
 
         # Export button
-        self.exportModelButton = qt.QPushButton("Export Model")
-        self.exportModelButton.toolTip = "Export the inner surface model to the selected node."
-        self.exportModelButton.enabled = False
-        exportModelFormLayout.addRow(self.exportModelButton)
+        self.generateMoldButton = qt.QPushButton("Generate Mold")
+        self.generateMoldButton.toolTip = "Generate the inner surface mold in the segmentation node."
+        self.generateMoldButton.enabled = False
+        exportModelFormLayout.addRow(self.generateMoldButton)
+
+        # Generate base button
+        self.generateBasePlateButton = qt.QPushButton("Generate Base Plate")
+        self.generateBasePlateButton.toolTip = "Generate the mold base plate in the segmentation node."
+        self.generateBasePlateButton.enabled = False
+        exportModelFormLayout.addRow(self.generateBasePlateButton)
+
+        self.basePlateDepthSlider = ctk.ctkSliderWidget()
+        self.basePlateDepthSlider.singleStep = 0.1
+        self.basePlateDepthSlider.pageStep = 1
+        self.basePlateDepthSlider.minimum = 0
+        self.basePlateDepthSlider.maximum = 20
+        self.basePlateDepthSlider.value = 10
+        self.basePlateDepthSlider.decimals = 1
+        self.basePlateDepthSlider.setToolTip("Adjust the depth of the base plate for the mold")
+        exportModelFormLayout.addRow("Base Plate Depth", self.basePlateDepthSlider)
+
 
         # Add vertical spacer
         self.layout.addSpacing(vSpace)
@@ -331,14 +320,14 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
 
         self.heartValveSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onSelect)
         self.inputSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onSelect)
-        self.outputSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onSelect)
+        self.outputSegmentationSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onSelect)
 
         self.markupsSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onSelect)
         self.generateSurfaceMarkups.connect('clicked(bool)', self.onGenerateSurfaceMarkups)
 
-        self.modelSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onSelect)
-        self.annulusModelSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onSelect)
-        self.exportModelButton.connect('clicked(bool)', self.onExportModelButton)
+        self.generateMoldButton.connect('clicked(bool)', self.onExportModelButton)
+        self.generateBasePlateButton.connect('clicked(bool)', self.onGenerateBasePlate)
+        self.basePlateDepthSlider.connect('valueChanged(double)', self.onGenerateBasePlate)
 
         # Add vertical spacer
         self.layout.addStretch(1)
@@ -350,10 +339,10 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         pass
 
     def onSelect(self):
-        self.initBPButton.enabled = self.heartValveSelector.currentNode() and self.inputSelector.currentNode() and self.outputSelector.currentNode()
-        self.generateSurfaceMarkups.enabled = self.heartValveSelector.currentNode() and self.outputSelector.currentNode() and self.markupsSelector.currentNode()
-        self.exportModelButton.enabled = self.heartValveSelector.currentNode() and self.outputSelector.currentNode() \
-                                         and self.modelSelector.currentNode() and self.annulusModelSelector.currentNode()
+        self.initBPButton.enabled = self.heartValveSelector.currentNode() and self.inputSelector.currentNode() and self.outputSegmentationSelector.currentNode()
+        self.generateSurfaceMarkups.enabled = self.heartValveSelector.currentNode() and self.outputSegmentationSelector.currentNode() and self.markupsSelector.currentNode()
+        self.generateMoldButton.enabled = self.heartValveSelector.currentNode() and self.outputSegmentationSelector.currentNode()
+        self.generateBasePlateButton.enabled = self.heartValveSelector.currentNode() and self.outputSegmentationSelector.currentNode()
 
     def onInitBPButton(self):
         try:
@@ -362,7 +351,7 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
 
             enableScreenshotsFlag = self.enableScreenshotsFlagCheckBox.checked
             self.logic.initBPSeg(self.inputSelector.currentNode(), self.heartValveSelector.currentNode(),
-                                 self.outputSelector.currentNode())
+                                 self.outputSegmentationSelector.currentNode())
             self.incrementFirstButton50.enabled = True
             self.incrementFirstButton100.enabled = True
             self.incrementFirstButton500.enabled = True
@@ -375,7 +364,7 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
             # This can be a long operation - indicate it to the user
             qt.QApplication.setOverrideCursor(qt.Qt.WaitCursor)
 
-            self.logic.iterateFirstPass(50, self.outputSelector.currentNode())
+            self.logic.iterateFirstPass(50, self.outputSegmentationSelector.currentNode())
             self.undoButtonBP.enabled = True
 
         finally:
@@ -386,7 +375,7 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
             # This can be a long operation - indicate it to the user
             qt.QApplication.setOverrideCursor(qt.Qt.WaitCursor)
 
-            self.logic.iterateFirstPass(100, self.outputSelector.currentNode())
+            self.logic.iterateFirstPass(100, self.outputSegmentationSelector.currentNode())
             self.undoButtonBP.enabled = True
 
         finally:
@@ -397,7 +386,7 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
             # This can be a long operation - indicate it to the user
             qt.QApplication.setOverrideCursor(qt.Qt.WaitCursor)
 
-            self.logic.iterateFirstPass(500, self.outputSelector.currentNode())
+            self.logic.iterateFirstPass(500, self.outputSegmentationSelector.currentNode())
             self.undoButtonBP.enabled = True
 
         finally:
@@ -408,7 +397,7 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
             # This can be a long operation - indicate it to the user
             qt.QApplication.setOverrideCursor(qt.Qt.WaitCursor)
 
-            self.logic.initLeafletSeg(self.outputSelector.currentNode())
+            self.logic.initLeafletSeg(self.outputSegmentationSelector.currentNode())
             self.incrementButton10.enabled = True
             self.incrementButton50.enabled = True
             self.incrementButton200.enabled = True
@@ -417,7 +406,7 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
             qt.QApplication.restoreOverrideCursor()
 
     def onIncrement10Button(self):
-        self.logic.iterateSecondPass(10, self.outputSelector.currentNode())
+        self.logic.iterateSecondPass(10, self.outputSegmentationSelector.currentNode())
         self.undoButtonLeaflet.enabled = True
 
     def onIncrement50Button(self):
@@ -425,7 +414,7 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
             # This can be a long operation - indicate it to the user
             qt.QApplication.setOverrideCursor(qt.Qt.WaitCursor)
 
-            self.logic.iterateSecondPass(50, self.outputSelector.currentNode())
+            self.logic.iterateSecondPass(50, self.outputSegmentationSelector.currentNode())
             self.undoButtonLeaflet.enabled = True
 
         finally:
@@ -436,41 +425,44 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
             # This can be a long operation - indicate it to the user
             qt.QApplication.setOverrideCursor(qt.Qt.WaitCursor)
 
-            self.logic.iterateSecondPass(200, self.outputSelector.currentNode())
+            self.logic.iterateSecondPass(200, self.outputSegmentationSelector.currentNode())
             self.undoButtonLeaflet.enabled = True
 
         finally:
             qt.QApplication.restoreOverrideCursor()
 
     def onUndoButtonBP(self):
-        self.logic.undoBPIteration(self.outputSelector.currentNode())
+        self.logic.undoBPIteration(self.outputSegmentationSelector.currentNode())
         self.redoButtonBP.enabled = True
         self.undoButtonBP.enabled = False
 
     def onRedoButtonBP(self):
-        self.logic.redoBPIteration(self.outputSelector.currentNode())
+        self.logic.redoBPIteration(self.outputSegmentationSelector.currentNode())
         self.redoButtonBP.enabled = False
         self.undoButtonBP.enabled = True
 
     def onUndoButtonLeaflet(self):
-        self.logic.undoLeafletIteration(self.outputSelector.currentNode())
+        self.logic.undoLeafletIteration(self.outputSegmentationSelector.currentNode())
         self.redoButtonLeaflet.enabled = True
         self.undoButtonLeaflet.enabled = False
 
     def onRedoButtonLeaflet(self):
-        self.logic.redoLeafletIteration(self.outputSelector.currentNode())
+        self.logic.redoLeafletIteration(self.outputSegmentationSelector.currentNode())
         self.redoButtonLeaflet.enabled = False
         self.undoButtonLeaflet.enabled = True
 
     def onGenerateSurfaceMarkups(self):
-        success = self.logic.generateSurfaceMarkups(self.outputSelector.currentNode(),
+        success = self.logic.generateSurfaceMarkups(self.outputSegmentationSelector.currentNode(),
                                                     self.heartValveSelector.currentNode(),
                                                     self.markupsSelector.currentNode())
 
     def onExportModelButton(self):
-        self.logic.extractInnerSurfaceModel(self.outputSelector.currentNode(), self.heartValveSelector.currentNode(),
-                                            self.modelSelector.currentNode(), self.annulusModelSelector.currentNode())
+        self.logic.extractInnerSurfaceModel(self.outputSegmentationSelector.currentNode(),
+                                            self.heartValveSelector.currentNode())
 
+    def onGenerateBasePlate(self):
+        self.logic.generateBasePlate(self.outputSegmentationSelector.currentNode(),
+                                            self.heartValveSelector.currentNode(), float(self.basePlateDepthSlider.value))
 
 #
 # MVSegmenterLogic
@@ -496,6 +488,8 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         self._prevBpLevelSet = None
         self._prevLeafletLevelSet = None
         self._nextLeafletLevelSet = None
+
+        self.moldBasePlate = None
 
     def hasImageData(self, volumeNode):
         """This is an example logic method that
@@ -923,8 +917,8 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         return True
 
-    def extractInnerSurfaceModel(self, segNode, heartValveNode, outModel, outAnnulusModel):
-        if not segNode or not outModel or not heartValveNode or not outAnnulusModel:
+    def extractInnerSurfaceModel(self, segNode, heartValveNode):
+        if not segNode or not heartValveNode:
             logging.error("Missing parameter")
             return
 
@@ -937,15 +931,6 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         if leafletModel is None:
             logging.error("Missing segmentation")
             return
-
-        if not outModel.GetDisplayNodeID():
-            outModel.CreateDefaultDisplayNodes()
-
-        if not outAnnulusModel.GetDisplayNodeID():
-            outAnnulusModel.CreateDefaultDisplayNodes()
-
-        outModel.SetAndObserveTransformNodeID(segNode.GetTransformNodeID())
-        outAnnulusModel.SetAndObserveTransformNodeID(segNode.GetTransformNodeID())
 
         obb = vtk.vtkOBBTree()
         obb.SetDataSet(leafletModel)
@@ -1023,7 +1008,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         extrude.Update()
 
         # Make normals point outwards for final model
-        # TODO User button to manually flip if inverted for some reason
+        # TODO User button to manually flip if inverted for some reason (may not need after conversion to segmentations)
         normAuto = vtk.vtkPolyDataNormals()
         normAuto.AutoOrientNormalsOn()
         normAuto.SetFeatureAngle(45)
@@ -1035,8 +1020,18 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         innerModel = vtk.vtkPolyData()
         innerModel.DeepCopy(normAuto.GetOutput())
 
-        outModel.SetAndObservePolyData(innerModel)
+        # Add model to segmentation node
 
+        # Remove segment for inner surface if it does already exist
+        if segNode.GetSegmentation().GetSegmentIndex('Inner_Surface_Mold') != -1:
+            segNode.GetSegmentation().RemoveSegment('Inner_Surface_Mold')
+        # Add segment from polydata
+        segNode.AddSegmentFromClosedSurfaceRepresentation(innerModel, 'Inner_Surface_Mold')
+
+
+        # Project defined annulus onto inner surface
+
+        # Use OBBTree to find intersection with model
         obb = vtk.vtkOBBTree()
         obb.SetDataSet(innerModel)
         obb.BuildLocator()
@@ -1055,6 +1050,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
             if r != 0:
                 projPoints.InsertNextPoint(points.GetPoint(0))
 
+        # Close spline
         projPoints.InsertNextPoint(projPoints.GetPoint(0))
         projPoints.InsertNextPoint(projPoints.GetPoint(1))
 
@@ -1063,6 +1059,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         for i in range(projPoints.GetNumberOfPoints()):
             lines.InsertCellPoint(i)
 
+        # Create spline polydata
         projContour = vtk.vtkPolyData()
         projContour.SetPoints(projPoints)
         projContour.SetLines(lines)
@@ -1073,8 +1070,9 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         splineFilter.SetInputData(projContour)
         splineFilter.Update()
 
+        # Create tube from spline fitted projected annulus
         tubeFilter = vtk.vtkTubeFilter()
-        tubeFilter.SetRadius(1)
+        tubeFilter.SetRadius(1) # Radius of 1 determined through trial and error on printed models
         tubeFilter.SetNumberOfSides(20)
         tubeFilter.CappingOff()
         tubeFilter.SetInputConnection(splineFilter.GetOutputPort())
@@ -1084,13 +1082,153 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         cleanTube.SetInputConnection(tubeFilter.GetOutputPort())
         cleanTube.Update()
 
-        subtractFilter = vtk.vtkBooleanOperationPolyDataFilter()
-        subtractFilter.SetOperationToUnion()
-        subtractFilter.SetInputConnection(0, normAuto.GetOutputPort())
-        subtractFilter.SetInputConnection(1, cleanTube.GetOutputPort())
-        subtractFilter.Update()
+        # Push fitted annulus onto segmentation node
+        annulusFittedModel = vtk.vtkPolyData()
+        annulusFittedModel.DeepCopy(cleanTube.GetOutput())
 
-        outAnnulusModel.SetAndObservePolyData(cleanTube.GetOutput())
+        # Add model to segmentation node
+
+        # Remove segment for projected annulus if it does already exist
+        if segNode.GetSegmentation().GetSegmentIndex('Projected_Annulus') != -1:
+            segNode.GetSegmentation().RemoveSegment('Projected_Annulus')
+        # Add segment from polydata
+        segNode.AddSegmentFromClosedSurfaceRepresentation(annulusFittedModel, 'Projected_Annulus')
+
+
+    def generateBasePlate(self, segNode, heartValveNode, depth):
+        import vtkSegmentationCorePython as vtkSegmentationCore
+
+        if not segNode or not heartValveNode:
+            logging.error("Missing parameter")
+            return
+
+        valveModel = HeartValveLib.getValveModel(heartValveNode)
+        if valveModel.getAnnulusContourMarkupNode().GetNumberOfFiducials() == 0:
+            logging.error("Annulus contour not defined. See Valve Annulus Analysis.")
+            return
+
+        if valveModel.getAnnulusMarkupPositionByLabel('A') is None or valveModel.getAnnulusMarkupPositionByLabel('P') is None:
+            logging.error("Annulus points not defined. See Valve Quantification.")
+            return
+
+        moldModel = segNode.GetClosedSurfaceRepresentation('Inner_Surface_Mold')
+        if moldModel is None:
+            logging.error("Missing generated mold.")
+            return
+
+        contourPlane = valveModel.getAnnulusContourPlane()
+
+        if self.moldBasePlate is None:
+            # Read in base plate file
+            reader = vtk.vtkSTLReader()
+            reader.SetFileName(os.path.dirname(slicer.modules.mvsegmenter.path) + "/Resources/moldBasePlate.stl")
+            reader.Update()
+
+            self.moldBasePlate = vtk.vtkPolyData()
+            self.moldBasePlate.DeepCopy(reader.GetOutput())
+
+        # Get AP plane bounds of base plate
+        plane = vtk.vtkPlane()
+        plane.SetNormal(1,0,0)
+        plane.SetOrigin(0,0,0)
+
+        cutter = vtk.vtkCutter()
+        cutter.SetCutFunction(plane)
+
+        cutter.SetInputData(self.moldBasePlate)
+        cutter.Update()
+        bounds = cutter.GetOutput().GetBounds()
+
+        basePlateAPPoints = vtk.vtkPoints()
+        basePlateAPPoints.InsertNextPoint(0, bounds[3], bounds[4])    # A
+        basePlateAPPoints.InsertNextPoint(0, bounds[2], bounds[4])    # P
+
+        # Get annulus A P points
+        annulusAPPoints = vtk.vtkPoints()
+        annulusAPPoints.InsertNextPoint(valveModel.getAnnulusMarkupPositionByLabel('A'))
+        annulusAPPoints.InsertNextPoint(valveModel.getAnnulusMarkupPositionByLabel('P'))
+
+        # Do best fit registration from base plate bounds to annulus A P points
+        landmarkReg = vtk.vtkLandmarkTransform()
+        landmarkReg.SetModeToRigidBody()
+        landmarkReg.SetSourceLandmarks(basePlateAPPoints)
+        landmarkReg.SetTargetLandmarks(annulusAPPoints)
+        landmarkReg.Update()
+
+        translate = vtk.vtkTransform()
+        translate.Translate(contourPlane[1] * -1 * depth)
+        translate.PreMultiply()
+        translate.Concatenate(landmarkReg)
+        translate.Update()
+
+        # Align base plate with annulus normal ([0,0,1] translated, find transform to align to annulus normal, pre apply)
+        ##
+
+        transformFilter = vtk.vtkTransformFilter()
+        transformFilter.SetTransform(translate)
+        transformFilter.SetInputData(0, self.moldBasePlate)
+        transformFilter.Update()
+
+        # Remove segment for base plate if it does already exist
+        if segNode.GetSegmentation().GetSegmentIndex('Mold_Base_Plate') != -1:
+            segNode.GetSegmentation().RemoveSegment('Mold_Base_Plate')
+        # Add segment from polydata
+        segNode.AddSegmentFromClosedSurfaceRepresentation(transformFilter.GetOutput(), 'Mold_Base_Plate')
+
+        # Create clipped leaflet mold
+        clippingPlane = vtk.vtkPlane()
+        clippingPlane.SetNormal(translate.TransformNormal([0,0,1]))
+        clippingPlane.SetOrigin(translate.TransformPoint([0,0,1.67]))
+
+        clip = vtk.vtkClipPolyData()
+        clip.SetClipFunction(clippingPlane)
+        clip.SetInputData(moldModel)
+        clip.Update()
+
+        # if segNode.GetSegmentation().GetSegmentIndex('Clipped_Mold') != -1:
+        #     segNode.GetSegmentation().RemoveSegment('Clipped_Mold')
+        # # Add segment from polydata
+        # segNode.AddSegmentFromClosedSurfaceRepresentation(clip.GetOutput(), 'Clipped_Mold')
+
+        segNode.GetSegmentation().RemoveSegment('Clipped_Mold')
+        segNode.GetSegmentation().AddEmptySegment('Clipped_Mold')
+
+        segment = segNode.GetSegmentation().GetSegment('Clipped_Mold')
+        segment.AddRepresentation(
+            vtkSegmentationCore.vtkSegmentationConverter.GetSegmentationClosedSurfaceRepresentationName(),
+            clip.GetOutput())
+
+
+        # Sliders for manual fine tuning?
+
+        # Fill model
+        extrude = vtk.vtkLinearExtrusionFilter()
+        extrude.SetExtrusionTypeToVectorExtrusion()
+        extrude.SetVector(np.array(translate.TransformNormal([0,0,1])) * -1)
+        extrude.SetScaleFactor(20)
+        extrude.SetInputData(moldModel)
+        extrude.CappingOn()
+        extrude.Update()
+
+        cutter = vtk.vtkCutter()
+        cutter.SetCutFunction(clippingPlane)
+        cutter.SetInputConnection(extrude.GetOutputPort())
+        cutter.Update()
+
+        stripper = vtk.vtkStripper()
+        stripper.SetInputConnection(cutter.GetOutputPort())
+        stripper.Update()
+
+        tri = vtk.vtkDelaunay2D()
+        tri.SetInputConnection(stripper.GetOutputPort())
+        tri.Update()
+
+        print('tri')
+
+        if segNode.GetSegmentation().GetSegmentIndex('Fill_Plane') != -1:
+            segNode.GetSegmentation().RemoveSegment('Fill_Plane')
+        # Add segment from polydata
+        segNode.AddSegmentFromClosedSurfaceRepresentation(tri.GetOutput(), 'Fill_Plane')
 
 
 class MVSegmenterTest(ScriptedLoadableModuleTest):
