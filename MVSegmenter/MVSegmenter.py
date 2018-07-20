@@ -918,8 +918,6 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         return True
 
     def extractInnerSurfaceModel(self, segNode, heartValveNode):
-        import vtkSegmentationCorePython as vtkSegmentationCore
-
         if not segNode or not heartValveNode:
             logging.error("Missing parameter")
             return
@@ -1024,13 +1022,12 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         # Add model to segmentation node
 
-        # Create segment for inner surface if it does not already exist
-        segNode.GetSegmentation().RemoveSegment('Inner_Surface_Mold')
-        segNode.GetSegmentation().AddEmptySegment('Inner_Surface_Mold')
+        # Remove segment for inner surface if it does already exist
+        if segNode.GetSegmentation().GetSegmentIndex('Inner_Surface_Mold') != -1:
+            segNode.GetSegmentation().RemoveSegment('Inner_Surface_Mold')
+        # Add segment from polydata
+        segNode.AddSegmentFromClosedSurfaceRepresentation(innerModel, 'Inner_Surface_Mold')
 
-        segment = segNode.GetSegmentation().GetSegment('Inner_Surface_Mold')
-        segment.AddRepresentation(vtkSegmentationCore.vtkSegmentationConverter.GetSegmentationClosedSurfaceRepresentationName(),
-                innerModel)
 
         # Project defined annulus onto inner surface
 
@@ -1091,13 +1088,12 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         # Add model to segmentation node
 
-        # Create segment for inner surface if it does not already exist
-        segNode.GetSegmentation().RemoveSegment('Projected_Annulus')
-        segNode.GetSegmentation().AddEmptySegment('Projected_Annulus')
+        # Remove segment for projected annulus if it does already exist
+        if segNode.GetSegmentation().GetSegmentIndex('Projected_Annulus') != -1:
+            segNode.GetSegmentation().RemoveSegment('Projected_Annulus')
+        # Add segment from polydata
+        segNode.AddSegmentFromClosedSurfaceRepresentation(annulusFittedModel, 'Projected_Annulus')
 
-        segment = segNode.GetSegmentation().GetSegment('Projected_Annulus')
-        segment.AddRepresentation(vtkSegmentationCore.vtkSegmentationConverter.GetSegmentationClosedSurfaceRepresentationName(),
-                annulusFittedModel)
 
     def generateBasePlate(self, segNode, heartValveNode, depth):
         import vtkSegmentationCorePython as vtkSegmentationCore
@@ -1173,18 +1169,66 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         transformFilter.SetInputData(0, self.moldBasePlate)
         transformFilter.Update()
 
-        segNode.GetSegmentation().RemoveSegment('Mold_Base_Plate')
-        segNode.GetSegmentation().AddEmptySegment('Mold_Base_Plate')
+        # Remove segment for base plate if it does already exist
+        if segNode.GetSegmentation().GetSegmentIndex('Mold_Base_Plate') != -1:
+            segNode.GetSegmentation().RemoveSegment('Mold_Base_Plate')
+        # Add segment from polydata
+        segNode.AddSegmentFromClosedSurfaceRepresentation(transformFilter.GetOutput(), 'Mold_Base_Plate')
 
-        segment = segNode.GetSegmentation().GetSegment('Mold_Base_Plate')
+        # Create clipped leaflet mold
+        clippingPlane = vtk.vtkPlane()
+        clippingPlane.SetNormal(translate.TransformNormal([0,0,1]))
+        clippingPlane.SetOrigin(translate.TransformPoint([0,0,1.67]))
+
+        clip = vtk.vtkClipPolyData()
+        clip.SetClipFunction(clippingPlane)
+        clip.SetInputData(moldModel)
+        clip.Update()
+
+        # if segNode.GetSegmentation().GetSegmentIndex('Clipped_Mold') != -1:
+        #     segNode.GetSegmentation().RemoveSegment('Clipped_Mold')
+        # # Add segment from polydata
+        # segNode.AddSegmentFromClosedSurfaceRepresentation(clip.GetOutput(), 'Clipped_Mold')
+
+        segNode.GetSegmentation().RemoveSegment('Clipped_Mold')
+        segNode.GetSegmentation().AddEmptySegment('Clipped_Mold')
+
+        segment = segNode.GetSegmentation().GetSegment('Clipped_Mold')
         segment.AddRepresentation(
             vtkSegmentationCore.vtkSegmentationConverter.GetSegmentationClosedSurfaceRepresentationName(),
-            transformFilter.GetOutput())
+            clip.GetOutput())
 
 
         # Sliders for manual fine tuning?
 
         # Fill model
+        extrude = vtk.vtkLinearExtrusionFilter()
+        extrude.SetExtrusionTypeToVectorExtrusion()
+        extrude.SetVector(np.array(translate.TransformNormal([0,0,1])) * -1)
+        extrude.SetScaleFactor(20)
+        extrude.SetInputData(moldModel)
+        extrude.CappingOn()
+        extrude.Update()
+
+        cutter = vtk.vtkCutter()
+        cutter.SetCutFunction(clippingPlane)
+        cutter.SetInputConnection(extrude.GetOutputPort())
+        cutter.Update()
+
+        stripper = vtk.vtkStripper()
+        stripper.SetInputConnection(cutter.GetOutputPort())
+        stripper.Update()
+
+        tri = vtk.vtkDelaunay2D()
+        tri.SetInputConnection(stripper.GetOutputPort())
+        tri.Update()
+
+        print('tri')
+
+        if segNode.GetSegmentation().GetSegmentIndex('Fill_Plane') != -1:
+            segNode.GetSegmentation().RemoveSegment('Fill_Plane')
+        # Add segment from polydata
+        segNode.AddSegmentFromClosedSurfaceRepresentation(tri.GetOutput(), 'Fill_Plane')
 
 
 class MVSegmenterTest(ScriptedLoadableModuleTest):
