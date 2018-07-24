@@ -457,7 +457,7 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
                                                     self.markupsSelector.currentNode())
 
     def onExportModelButton(self):
-        self.logic.extractInnerSurfaceModel(self.outputSegmentationSelector.currentNode(),
+        self.logic.generateSurfaceMold(self.outputSegmentationSelector.currentNode(),
                                             self.heartValveSelector.currentNode())
 
     def onGenerateBasePlate(self):
@@ -917,21 +917,55 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         return True
 
+    def pushModelToSegmentation(self, segNode, model, name):
+        import vtkSegmentationCorePython as vtkSegmentationCore
+
+        if segNode.GetSegmentation().GetSegmentIndex(name) != -1:
+            segNode.GetSegmentation().RemoveSegment(name)
+        # Add segment from polydata
+        segNode.GetSegmentation().AddEmptySegment(name)
+        segment = segNode.GetSegmentation().GetSegment(name)
+        segment.AddRepresentation(
+            vtkSegmentationCore.vtkSegmentationConverter.GetSegmentationClosedSurfaceRepresentationName(),
+            model)
+
+    def generateSurfaceMold(self, segNode, heartValveNode):
+        # Check that parameters exist
+        if not segNode or not heartValveNode:
+            logging.error("Missing parameter")
+            return None
+
+        # Get the proximal surface of the valve
+        extractedSurface = self.extractInnerSurfaceModel(segNode, heartValveNode)
+        if not extractedSurface:
+            return None
+
+        self.pushModelToSegmentation(segNode, extractedSurface, 'Inner_Surface_Mold')
+
+        # Get the annulus projected onto the proximal surface
+        projectedAnnulus = self.generateProjectedAnnulus(extractedSurface, heartValveNode)
+        if not projectedAnnulus:
+            return None
+
+        self.pushModelToSegmentation(segNode, projectedAnnulus, 'Projected_Annulus')
+
+
     def extractInnerSurfaceModel(self, segNode, heartValveNode):
         if not segNode or not heartValveNode:
             logging.error("Missing parameter")
-            return
+            return None
 
         valveModel = HeartValveLib.getValveModel(heartValveNode)
         if valveModel.getAnnulusContourMarkupNode().GetNumberOfFiducials() == 0:
             logging.error("Annulus contour not defined")
-            return False
+            return None
 
         leafletModel = segNode.GetClosedSurfaceRepresentation('Leaflet Segmentation')
         if leafletModel is None:
             logging.error("Missing segmentation")
-            return
+            return None
 
+        # OBBTree for determining self intersection of rays
         obb = vtk.vtkOBBTree()
         obb.SetDataSet(leafletModel)
         obb.BuildLocator()
@@ -1008,7 +1042,6 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         extrude.Update()
 
         # Make normals point outwards for final model
-        # TODO User button to manually flip if inverted for some reason (may not need after conversion to segmentations)
         normAuto = vtk.vtkPolyDataNormals()
         normAuto.AutoOrientNormalsOn()
         normAuto.SetFeatureAngle(45)
@@ -1019,24 +1052,28 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         innerModel = vtk.vtkPolyData()
         innerModel.DeepCopy(normAuto.GetOutput())
+        return innerModel
 
-        # Add model to segmentation node
 
-        # Remove segment for inner surface if it does already exist
-        if segNode.GetSegmentation().GetSegmentIndex('Inner_Surface_Mold') != -1:
-            segNode.GetSegmentation().RemoveSegment('Inner_Surface_Mold')
-        # Add segment from polydata
-        segNode.AddSegmentFromClosedSurfaceRepresentation(innerModel, 'Inner_Surface_Mold')
+    def generateProjectedAnnulus(self, extractedLeaflet, heartValveNode):
+        if not extractedLeaflet or not heartValveNode:
+            logging.error("Missing parameter")
+            return None
 
+        valveModel = HeartValveLib.getValveModel(heartValveNode)
+        if valveModel.getAnnulusContourMarkupNode().GetNumberOfFiducials() == 0:
+            logging.error("Annulus contour not defined")
+            return None
 
         # Project defined annulus onto inner surface
 
         # Use OBBTree to find intersection with model
         obb = vtk.vtkOBBTree()
-        obb.SetDataSet(innerModel)
+        obb.SetDataSet(extractedLeaflet)
         obb.BuildLocator()
 
         annulusMarkups = valveModel.getAnnulusContourMarkupNode()
+        contourPlane = valveModel.getAnnulusContourPlane()
         pos = np.zeros(3)
         points = vtk.vtkPoints()
         projPoints = vtk.vtkPoints()
@@ -1085,14 +1122,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         # Push fitted annulus onto segmentation node
         annulusFittedModel = vtk.vtkPolyData()
         annulusFittedModel.DeepCopy(cleanTube.GetOutput())
-
-        # Add model to segmentation node
-
-        # Remove segment for projected annulus if it does already exist
-        if segNode.GetSegmentation().GetSegmentIndex('Projected_Annulus') != -1:
-            segNode.GetSegmentation().RemoveSegment('Projected_Annulus')
-        # Add segment from polydata
-        segNode.AddSegmentFromClosedSurfaceRepresentation(annulusFittedModel, 'Projected_Annulus')
+        return annulusFittedModel
 
 
     def generateBasePlate(self, segNode, heartValveNode, depth):
@@ -1118,6 +1148,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         contourPlane = valveModel.getAnnulusContourPlane()
 
+        # Load the base plate model from file if not already loaded
         if self.moldBasePlate is None:
             # Read in base plate file
             reader = vtk.vtkSTLReader()
@@ -1169,11 +1200,8 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         transformFilter.SetInputData(0, self.moldBasePlate)
         transformFilter.Update()
 
-        # Remove segment for base plate if it does already exist
-        if segNode.GetSegmentation().GetSegmentIndex('Mold_Base_Plate') != -1:
-            segNode.GetSegmentation().RemoveSegment('Mold_Base_Plate')
-        # Add segment from polydata
-        segNode.AddSegmentFromClosedSurfaceRepresentation(transformFilter.GetOutput(), 'Mold_Base_Plate')
+        # Add transformed base plate to segmentation
+        self.pushModelToSegmentation(segNode, transformFilter.GetOutput(), 'Mold_Base_Plate')
 
         # Create clipped leaflet mold
         clippingPlane = vtk.vtkPlane()
@@ -1222,8 +1250,6 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         tri = vtk.vtkDelaunay2D()
         tri.SetInputConnection(stripper.GetOutputPort())
         tri.Update()
-
-        print('tri')
 
         if segNode.GetSegmentation().GetSegmentIndex('Fill_Plane') != -1:
             segNode.GetSegmentation().RemoveSegment('Fill_Plane')
