@@ -909,7 +909,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         markupsNode.EndModify(mNodeModifyState)
         fixedMarkupsNode.EndModify(fNodeModifyState)
-
+        
         markupsNode.GetMarkupsDisplayNode().SetTextScale(0)
 
         fixedMarkupsNode.GetMarkupsDisplayNode().SetVisibility(0)
@@ -1097,6 +1097,8 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         bottomMold = vtk.vtkPolyData()
         bottomMold.DeepCopy(holeFill.GetOutput())
 
+        # Put top, bottom and base of mold together
+
         append = vtk.vtkAppendPolyData()
         append.AddInputData(topMold)
         append.AddInputData(bottomMold)
@@ -1117,7 +1119,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         self.pushModelToSegmentation(segNode, mold, 'Final_Mold')
 
-        # Remake closed surface representation after adding mold
+        # Remake closed surface representation after adding mold (makes it generated model from labelmap)
         segNode.RemoveClosedSurfaceRepresentation()
         segNode.CreateClosedSurfaceRepresentation()
 
@@ -1239,10 +1241,6 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
             if r != 0:
                 projPoints.InsertNextPoint(points.GetPoint(0))
 
-        # Close spline
-        projPoints.InsertNextPoint(projPoints.GetPoint(0))
-        projPoints.InsertNextPoint(projPoints.GetPoint(1))
-
         lines = vtk.vtkCellArray()
         lines.InsertNextCell(projPoints.GetNumberOfPoints())
         for i in range(projPoints.GetNumberOfPoints()):
@@ -1259,12 +1257,17 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         splineFilter.SetInputData(projContour)
         splineFilter.Update()
 
+        # Close spline
+        strip = vtk.vtkStripper()
+        strip.SetInputConnection(splineFilter.GetOutputPort())
+        strip.Update()
+
         # Create tube from spline fitted projected annulus
         tubeFilter = vtk.vtkTubeFilter()
         tubeFilter.SetRadius(1) # Radius of 1 determined through trial and error on printed models
         tubeFilter.SetNumberOfSides(20)
         tubeFilter.CappingOff()
-        tubeFilter.SetInputConnection(splineFilter.GetOutputPort())
+        tubeFilter.SetInputConnection(strip.GetOutputPort())
         tubeFilter.Update()
 
         cleanTube = vtk.vtkCleanPolyData()
