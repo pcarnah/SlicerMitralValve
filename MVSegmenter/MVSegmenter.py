@@ -457,8 +457,15 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
                                                     self.markupsSelector.currentNode())
 
     def onExportModelButton(self):
-        self.logic.generateSurfaceMold(self.outputSegmentationSelector.currentNode(),
-                                            self.heartValveSelector.currentNode(), float(self.basePlateDepthSlider.value))
+        try:
+            # This can be a long operation - indicate it to the user
+            qt.QApplication.setOverrideCursor(qt.Qt.WaitCursor)
+
+            self.logic.generateSurfaceMold(self.outputSegmentationSelector.currentNode(),
+                                           self.heartValveSelector.currentNode(), float(self.basePlateDepthSlider.value))
+
+        finally:
+            qt.QApplication.restoreOverrideCursor()
 
     def onGenerateBasePlate(self):
         return
@@ -916,11 +923,12 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         if segNode.GetSegmentation().GetSegmentIndex(name) != -1:
             segNode.GetSegmentation().RemoveSegment(name)
         # Add segment from polydata
-        segNode.GetSegmentation().AddEmptySegment(name)
-        segment = segNode.GetSegmentation().GetSegment(name)
+        segment = vtkSegmentationCore.vtkSegment()
+        segment.SetName(name)
         segment.AddRepresentation(
             vtkSegmentationCore.vtkSegmentationConverter.GetSegmentationClosedSurfaceRepresentationName(),
             model)
+        segNode.GetSegmentation().AddSegment(segment, name)
 
     def generateSurfaceMold(self, segNode, heartValveNode, depth):
         # Check that parameters exist
@@ -1072,14 +1080,13 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         loop.SetInputConnection(cutter.GetOutputPort())
         loop.Update()
 
-        appendBase = vtk.vtkAppendPolyData()
-        appendBase.AddInputConnection(clipBase.GetOutputPort())
-        appendBase.AddInputConnection(loop.GetOutputPort())
-        # appendBase.AddInputData(transformedBasePlate)
-        appendBase.Update()
+        appendBottom = vtk.vtkAppendPolyData()
+        appendBottom.AddInputConnection(clipBase.GetOutputPort())
+        appendBottom.AddInputConnection(loop.GetOutputPort())
+        appendBottom.Update()
 
         clean = vtk.vtkCleanPolyData()
-        clean.SetInputConnection(appendBase.GetOutputPort())
+        clean.SetInputConnection(appendBottom.GetOutputPort())
         clean.Update()
 
         holeFill = vtk.vtkFillHolesFilter()
@@ -1090,18 +1097,10 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         bottomMold = vtk.vtkPolyData()
         bottomMold.DeepCopy(holeFill.GetOutput())
 
-        merge = vtk.vtkLoopBooleanPolyDataFilter()
-        merge.SetOperationToUnion()
-        merge.SetInputData(0, bottomMold)
-        merge.SetInputData(1, topMold)
-        merge.SetNoIntersectionOutput(3)
-        # merge.Update()
-
-        # print(merge)
-
         append = vtk.vtkAppendPolyData()
         append.AddInputData(topMold)
         append.AddInputData(bottomMold)
+        append.AddInputData(transformedBasePlate)
         append.Update()
 
         clean = vtk.vtkCleanPolyData()
@@ -1118,7 +1117,9 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         self.pushModelToSegmentation(segNode, mold, 'Final_Mold')
 
-
+        # Remake closed surface representation after adding mold
+        segNode.RemoveClosedSurfaceRepresentation()
+        segNode.CreateClosedSurfaceRepresentation()
 
 
     def extractInnerSurfaceModel(self, segNode, valveModel):
