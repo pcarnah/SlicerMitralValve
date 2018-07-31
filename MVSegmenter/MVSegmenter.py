@@ -327,7 +327,7 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
 
         self.generateMoldButton.connect('clicked(bool)', self.onExportModelButton)
         self.generateBasePlateButton.connect('clicked(bool)', self.onGenerateBasePlate)
-        self.basePlateDepthSlider.connect('valueChanged(double)', self.onExportModelButton)
+        # self.basePlateDepthSlider.connect('valueChanged(double)', self.onExportModelButton)
 
         # Add vertical spacer
         self.layout.addStretch(1)
@@ -801,8 +801,8 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         if segmentationNode.GetSegmentation().GetSegmentIndex(segmentId) == -1:
             segmentationNode.GetSegmentation().AddEmptySegment(segmentId)
 
-        if segmentationNode.GetSegmentation().GetConversionParameter('Decimation factor') != '0.3':
-            segmentationNode.GetSegmentation().SetConversionParameter('Decimation factor', '0.3')
+        if segmentationNode.GetSegmentation().GetConversionParameter('Decimation factor') != '0.0':
+            segmentationNode.GetSegmentation().SetConversionParameter('Decimation factor', '0.0')
             segmentationNode.RemoveClosedSurfaceRepresentation()
             segmentationNode.CreateClosedSurfaceRepresentation()
 
@@ -948,161 +948,43 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         if not projectedAnnulus:
             return None
 
+        # self.pushModelToSegmentation(segNode, extractedSurface, 'Extracted_Surface')
         self.pushModelToSegmentation(segNode, projectedAnnulus, 'Projected_Annulus')
 
         contourPlane = valveModel.getAnnulusContourPlane()
 
         # Load base plate and get alignment transform
-        basePlate = self.getBasePlate()
-        basePlateTransform = self.getBasePlateAlignmentTransform(basePlate, valveModel, depth)
+        # basePlate = self.getBasePlate()
+        # basePlateThinHeight, basePlateThickHeight = self.getBasePlateHeights(basePlate)
+        # basePlateTransform = self.getBasePlateAlignmentTransform(basePlate, valveModel, depth)
+        # if not basePlateTransform:
+        #     return None
+        #
+        # transformFilter = vtk.vtkTransformFilter()
+        # transformFilter.SetTransform(basePlateTransform)
+        # transformFilter.SetInputData(basePlate)
+        # transformFilter.Update()
 
-        transformFilter = vtk.vtkTransformFilter()
-        transformFilter.SetTransform(basePlateTransform)
-        transformFilter.SetInputData(basePlate)
-        transformFilter.Update()
-
-        transformedBasePlate = vtk.vtkPolyData()
-        transformedBasePlate.DeepCopy(transformFilter.GetOutput())
+        # transformedBasePlate = vtk.vtkPolyData()
+        # transformedBasePlate.DeepCopy(transformFilter.GetOutput())
 
         # Create clipped leaflet mold across middle
         baseClippingPlane = vtk.vtkPlane()
-        baseClippingPlane.SetNormal(basePlateTransform.TransformNormal([0, 0, 1]))
-        baseClippingPlane.SetOrigin(basePlateTransform.TransformPoint([0, 0, 1.67]))
+        baseClippingPlane.SetNormal(contourPlane[1])
+        baseClippingPlane.SetOrigin(contourPlane[0] + [0,0,depth])
 
         midClippingPlane = vtk.vtkPlane()
-        midClippingPlane.SetNormal(basePlateTransform.TransformNormal([0, 0, 1]))
+        midClippingPlane.SetNormal(contourPlane[1])
         midClippingPlane.SetOrigin(contourPlane[0])
 
-        clipMid = vtk.vtkClipPolyData()
-        clipMid.SetClipFunction(midClippingPlane)
-        clipMid.SetInputData(extractedSurface)
-        clipMid.GenerateClippedOutputOn()
-        clipMid.Update()
-
-        # Extrusion towards annulus centroid to thicken leaflet walls inwards
-        clean = vtk.vtkCleanPolyData()
-        clean.SetInputConnection(clipMid.GetOutputPort())
-        clean.Update()
-
-        holeFill = vtk.vtkFillHolesFilter()
-        holeFill.SetInputConnection(clean.GetOutputPort())
-        holeFill.SetHoleSize(5)
-        holeFill.Update()
-
-        extrudeIn = vtk.vtkLinearExtrusionFilter()
-        extrudeIn.CappingOn()
-        extrudeIn.SetExtrusionTypeToPointExtrusion()
-        extrudeIn.SetScaleFactor(-0.5)
-        extrudeIn.SetExtrusionPoint(contourPlane[0])
-        extrudeIn.SetInputConnection(holeFill.GetOutputPort())
-        extrudeIn.Update()
-
-        # Need clean then fill to close extruded model
-        clean = vtk.vtkCleanPolyData()
-        clean.SetInputConnection(extrudeIn.GetOutputPort())
-        clean.Update()
-
-        holeFill = vtk.vtkFillHolesFilter()
-        holeFill.SetInputConnection(clean.GetOutputPort())
-        holeFill.SetHoleSize(10000)
-        holeFill.Update()
-
-        # Make normals point outwards for final model
-        normAuto = vtk.vtkPolyDataNormals()
-        normAuto.AutoOrientNormalsOn()
-        normAuto.ConsistencyOn()
-        normAuto.SetInputConnection(holeFill.GetOutputPort())
-        normAuto.Update()
-
-        topMold = vtk.vtkPolyData()
-        topMold.DeepCopy(holeFill.GetOutput())
-
-        # Fill across mid clip plane
-        cutter = vtk.vtkCutter()
-        cutter.SetCutFunction(midClippingPlane)
-        cutter.SetInputData(extractedSurface)
-        cutter.Update()
-
-        loop = vtk.vtkContourLoopExtraction()
-        loop.SetNormal(contourPlane[1])
-        loop.SetLoopClosureToAll()
-        loop.SetInputConnection(cutter.GetOutputPort())
-        loop.Update()
-
-        # Add fill back on to clipped bottom mold and clean
-        append = vtk.vtkAppendPolyData()
-        append.AddInputConnection(clipMid.GetClippedOutputPort())
-        append.AddInputConnection(loop.GetOutputPort())
-        append.Update()
-
-        clean = vtk.vtkCleanPolyData()
-        clean.SetInputConnection(append.GetOutputPort())
-        clean.Update()
-
-        # Extrude bottom part of mold down with filled clip plane
-        extrudeDown = vtk.vtkLinearExtrusionFilter()
-        extrudeDown.SetExtrusionTypeToVectorExtrusion()
-        extrudeDown.SetVector(np.array(basePlateTransform.TransformNormal([0, 0, 1])) * -1)
-        extrudeDown.SetScaleFactor(40)
-        extrudeDown.SetInputConnection(clean.GetOutputPort())
-        extrudeDown.CappingOff()
-        extrudeDown.Update()
-
-        append = vtk.vtkAppendPolyData()
-        append.AddInputConnection(extrudeDown.GetOutputPort())
-        append.AddInputConnection(clean.GetOutputPort())
-        append.Update()
-
-        clean = vtk.vtkCleanPolyData()
-        clean.SetInputConnection(append.GetOutputPort())
-        clean.Update()
-
-        holeFill = vtk.vtkFillHolesFilter()
-        holeFill.SetInputConnection(clean.GetOutputPort())
-        holeFill.SetHoleSize(10000)
-        holeFill.Update()
-
-        # Perform the bottom clipping at the specified depth
-        clipBase = vtk.vtkClipPolyData()
-        clipBase.SetClipFunction(baseClippingPlane)
-        clipBase.SetInputConnection(holeFill.GetOutputPort())
-        clipBase.Update()
-
-        # Fill bottom clip plane
-        cutter = vtk.vtkCutter()
-        cutter.SetCutFunction(baseClippingPlane)
-        cutter.SetInputConnection(holeFill.GetOutputPort())
-        cutter.Update()
-
-        loop = vtk.vtkContourLoopExtraction()
-        loop.SetNormal(contourPlane[1])
-        loop.SetLoopClosureToAll()
-        loop.SetInputConnection(cutter.GetOutputPort())
-        loop.Update()
-
-        appendBottom = vtk.vtkAppendPolyData()
-        appendBottom.AddInputConnection(clipBase.GetOutputPort())
-        appendBottom.AddInputConnection(loop.GetOutputPort())
-        appendBottom.Update()
-
-        clean = vtk.vtkCleanPolyData()
-        clean.SetInputConnection(appendBottom.GetOutputPort())
-        clean.Update()
-
-        holeFill = vtk.vtkFillHolesFilter()
-        holeFill.SetInputConnection(clean.GetOutputPort())
-        holeFill.SetHoleSize(10000)
-        holeFill.Update()
-
-        bottomMold = vtk.vtkPolyData()
-        bottomMold.DeepCopy(holeFill.GetOutput())
+        topMold, bottomMold = self.buildMoldHalves(extractedSurface, midClippingPlane, baseClippingPlane)
 
         # Put top, bottom and base of mold together
 
         append = vtk.vtkAppendPolyData()
         append.AddInputData(topMold)
         append.AddInputData(bottomMold)
-        append.AddInputData(transformedBasePlate)
+        # append.AddInputData(transformedBasePlate)
         append.Update()
 
         clean = vtk.vtkCleanPolyData()
@@ -1118,6 +1000,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         mold.DeepCopy(holeFill.GetOutput())
 
         self.pushModelToSegmentation(segNode, mold, 'Final_Mold')
+        # self.pushModelToSegmentation(segNode, transformedBasePlate, 'Base_Plate')
 
         # Remake closed surface representation after adding mold (makes it generated model from labelmap)
         segNode.RemoveClosedSurfaceRepresentation()
@@ -1279,6 +1162,133 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         annulusFittedModel.DeepCopy(cleanTube.GetOutput())
         return annulusFittedModel
 
+    def buildMoldHalves(self, extractedSurface, midClippingPlane, baseClippingPlane):
+        clipMid = vtk.vtkClipPolyData()
+        clipMid.SetClipFunction(midClippingPlane)
+        clipMid.SetInputData(extractedSurface)
+        clipMid.GenerateClippedOutputOn()
+        clipMid.Update()
+
+        # Extrusion towards annulus centroid to thicken leaflet walls inwards
+        clean = vtk.vtkCleanPolyData()
+        clean.SetInputConnection(clipMid.GetOutputPort())
+        clean.Update()
+
+        holeFill = vtk.vtkFillHolesFilter()
+        holeFill.SetInputConnection(clean.GetOutputPort())
+        holeFill.SetHoleSize(5)
+        holeFill.Update()
+
+        extrudeIn = vtk.vtkLinearExtrusionFilter()
+        extrudeIn.CappingOn()
+        extrudeIn.SetExtrusionTypeToPointExtrusion()
+        extrudeIn.SetScaleFactor(-0.5)
+        extrudeIn.SetExtrusionPoint(midClippingPlane.GetOrigin())
+        extrudeIn.SetInputConnection(holeFill.GetOutputPort())
+        extrudeIn.Update()
+
+        # Need clean then fill to close extruded model
+        clean = vtk.vtkCleanPolyData()
+        clean.SetInputConnection(extrudeIn.GetOutputPort())
+        clean.Update()
+
+        holeFill = vtk.vtkFillHolesFilter()
+        holeFill.SetInputConnection(clean.GetOutputPort())
+        holeFill.SetHoleSize(10000)
+        holeFill.Update()
+
+        # Make normals point outwards for final model
+        normAuto = vtk.vtkPolyDataNormals()
+        normAuto.AutoOrientNormalsOn()
+        normAuto.ConsistencyOn()
+        normAuto.SetInputConnection(holeFill.GetOutputPort())
+        normAuto.Update()
+
+        topMold = vtk.vtkPolyData()
+        topMold.DeepCopy(holeFill.GetOutput())
+
+        # Fill across mid clip plane
+        cutter = vtk.vtkCutter()
+        cutter.SetCutFunction(midClippingPlane)
+        cutter.SetInputData(extractedSurface)
+        cutter.Update()
+
+        loop = vtk.vtkContourLoopExtraction()
+        loop.SetNormal(midClippingPlane.GetNormal())
+        loop.SetLoopClosureToAll()
+        loop.SetInputConnection(cutter.GetOutputPort())
+        loop.Update()
+
+        # Add fill back on to clipped bottom mold and clean
+        append = vtk.vtkAppendPolyData()
+        append.AddInputConnection(clipMid.GetClippedOutputPort())
+        append.AddInputConnection(loop.GetOutputPort())
+        append.Update()
+
+        clean = vtk.vtkCleanPolyData()
+        clean.SetInputConnection(append.GetOutputPort())
+        clean.Update()
+
+        # Extrude bottom part of mold down with filled clip plane
+        extrudeDown = vtk.vtkLinearExtrusionFilter()
+        extrudeDown.SetExtrusionTypeToVectorExtrusion()
+        extrudeDown.SetVector(np.array(midClippingPlane.GetNormal()) * -1)
+        extrudeDown.SetScaleFactor(40)
+        extrudeDown.SetInputConnection(clean.GetOutputPort())
+        extrudeDown.CappingOff()
+        extrudeDown.Update()
+
+        append = vtk.vtkAppendPolyData()
+        append.AddInputConnection(extrudeDown.GetOutputPort())
+        append.AddInputConnection(clean.GetOutputPort())
+        append.Update()
+
+        clean = vtk.vtkCleanPolyData()
+        clean.SetInputConnection(append.GetOutputPort())
+        clean.Update()
+
+        holeFill = vtk.vtkFillHolesFilter()
+        holeFill.SetInputConnection(clean.GetOutputPort())
+        holeFill.SetHoleSize(10000)
+        holeFill.Update()
+
+        # Perform the bottom clipping at the specified depth
+        clipBase = vtk.vtkClipPolyData()
+        clipBase.SetClipFunction(baseClippingPlane)
+        clipBase.SetInputConnection(holeFill.GetOutputPort())
+        clipBase.Update()
+
+        # Fill bottom clip plane
+        cutter = vtk.vtkCutter()
+        cutter.SetCutFunction(baseClippingPlane)
+        cutter.SetInputConnection(holeFill.GetOutputPort())
+        cutter.Update()
+
+        loop = vtk.vtkContourLoopExtraction()
+        loop.SetNormal(baseClippingPlane.GetNormal())
+        loop.SetLoopClosureToAll()
+        loop.SetInputConnection(cutter.GetOutputPort())
+        loop.Update()
+
+        appendBottom = vtk.vtkAppendPolyData()
+        appendBottom.AddInputConnection(clipBase.GetOutputPort())
+        appendBottom.AddInputConnection(loop.GetOutputPort())
+        appendBottom.Update()
+
+        clean = vtk.vtkCleanPolyData()
+        clean.SetInputConnection(appendBottom.GetOutputPort())
+        clean.Update()
+
+        holeFill = vtk.vtkFillHolesFilter()
+        holeFill.SetInputConnection(clean.GetOutputPort())
+        holeFill.SetHoleSize(10000)
+        holeFill.Update()
+
+        bottomMold = vtk.vtkPolyData()
+        bottomMold.DeepCopy(holeFill.GetOutput())
+
+        return topMold, bottomMold
+
     def getBasePlate(self):
         # Load the base plate model from file if not already loaded
         if self.moldBasePlate is None:
@@ -1321,8 +1331,8 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         bounds = cutter.GetOutput().GetBounds()
 
         basePlateAPPoints = vtk.vtkPoints()
-        basePlateAPPoints.InsertNextPoint(0, bounds[3], bounds[4])  # A
-        basePlateAPPoints.InsertNextPoint(0, bounds[2], bounds[4])  # P
+        basePlateAPPoints.InsertNextPoint(bounds[0], bounds[3], bounds[4])  # A
+        basePlateAPPoints.InsertNextPoint(bounds[0], bounds[2], bounds[4])  # P
 
         # Get annulus A P points
         annulusAPPoints = vtk.vtkPoints()
@@ -1348,54 +1358,41 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         return translate
 
-    def generateBasePlate(self, segNode, valveModel, depth):
-        if not segNode or not valveModel:
+    def getBasePlateHeights(self, basePlate):
+        if not basePlate:
             logging.error("Missing parameter")
             return
 
-        if valveModel.getAnnulusContourMarkupNode().GetNumberOfFiducials() == 0:
-            logging.error("Annulus contour not defined. See Valve Annulus Analysis.")
-            return
+        obb = vtk.vtkOBBTree()
+        obb.SetDataSet(basePlate)
+        obb.BuildLocator()
 
-        moldModel = segNode.GetClosedSurfaceRepresentation('Inner_Surface_Mold')
-        if moldModel is None:
-            logging.error("Missing generated mold.")
-            return
+        com = vtk.vtkCenterOfMass()
+        com.SetInputData(basePlate)
+        com.Update()
+        origin = com.GetCenter()
 
-        # Load base plate and get alignment transform
-        basePlate = self.getBasePlate()
-        basePlateTransform = self.getBasePlateAlignmentTransform(basePlate, valveModel, depth)
+        # Get AP plane bounds of base plate
+        plane = vtk.vtkPlane()
+        plane.SetNormal(1, 0, 0)
+        plane.SetOrigin(origin)
 
-        transformFilter = vtk.vtkTransformFilter()
-        transformFilter.SetTransform(basePlateTransform)
-        transformFilter.SetInputData(basePlate)
-        transformFilter.Update()
-
-        transformedBasePlate = vtk.vtkPolyData()
-        transformedBasePlate.DeepCopy(transformFilter.GetOutput())
-
-        # Add transformed base plate to segmentation
-        self.pushModelToSegmentation(segNode, transformedBasePlate, 'Mold_Base_Plate')
-
-        # Cut along clip plane
         cutter = vtk.vtkCutter()
-        cutter.SetCutFunction(clippingPlane)
-        cutter.SetInputConnection(extrude.GetOutputPort())
+        cutter.SetCutFunction(plane)
+
+        cutter.SetInputData(basePlate)
         cutter.Update()
+        bounds = cutter.GetOutput().GetBounds()
+        thickHeight = bounds[5] - bounds[4]
 
-        # Connect the cut boundary
-        stripper = vtk.vtkStripper()
-        stripper.SetInputConnection(cutter.GetOutputPort())
-        stripper.Update()
+        A = np.array([bounds[0], bounds[3], bounds[4]])  # A
 
-        # Triangulate and fill the clip plane
-        # TODO integrate new filled mold technique
-        tri = vtk.vtkDelaunay2D()
-        tri.SetInputConnection(stripper.GetOutputPort())
-        tri.Update()
+        points = vtk.vtkPoints()
+        obb.IntersectWithLine(A + [0,0,-10], A + [0,0,10], points, None)
+        bounds = points.GetBounds()
+        thinHeight =  bounds[5] - bounds[4]
 
-        self.pushModelToSegmentation(segNode, tri.GetOutput(), 'Fill_Plane')
-
+        return thinHeight, thickHeight
 
 
 class MVSegmenterTest(ScriptedLoadableModuleTest):
