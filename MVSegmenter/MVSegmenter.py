@@ -948,25 +948,9 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         if not projectedAnnulus:
             return None
 
-        # self.pushModelToSegmentation(segNode, extractedSurface, 'Extracted_Surface')
         self.pushModelToSegmentation(segNode, projectedAnnulus, 'Projected_Annulus')
 
         contourPlane = valveModel.getAnnulusContourPlane()
-
-        # Load base plate and get alignment transform
-        # basePlate = self.getBasePlate()
-        # basePlateThinHeight, basePlateThickHeight = self.getBasePlateHeights(basePlate)
-        # basePlateTransform = self.getBasePlateAlignmentTransform(basePlate, valveModel, depth)
-        # if not basePlateTransform:
-        #     return None
-        #
-        # transformFilter = vtk.vtkTransformFilter()
-        # transformFilter.SetTransform(basePlateTransform)
-        # transformFilter.SetInputData(basePlate)
-        # transformFilter.Update()
-
-        # transformedBasePlate = vtk.vtkPolyData()
-        # transformedBasePlate.DeepCopy(transformFilter.GetOutput())
 
         # Create clipped leaflet mold across middle
         baseClippingPlane = vtk.vtkPlane()
@@ -984,7 +968,6 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         append = vtk.vtkAppendPolyData()
         append.AddInputData(topMold)
         append.AddInputData(bottomMold)
-        # append.AddInputData(transformedBasePlate)
         append.Update()
 
         clean = vtk.vtkCleanPolyData()
@@ -1000,7 +983,6 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         mold.DeepCopy(holeFill.GetOutput())
 
         self.pushModelToSegmentation(segNode, mold, 'Final_Mold')
-        # self.pushModelToSegmentation(segNode, transformedBasePlate, 'Base_Plate')
 
         # Remake closed surface representation after adding mold (makes it generated model from labelmap)
         segNode.RemoveClosedSurfaceRepresentation()
@@ -1169,7 +1151,20 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         clipMid.GenerateClippedOutputOn()
         clipMid.Update()
 
+        # Fill across mid clip plane
+        cutter = vtk.vtkCutter()
+        cutter.SetCutFunction(midClippingPlane)
+        cutter.SetInputData(extractedSurface)
+        cutter.Update()
+
+        loop = vtk.vtkContourLoopExtraction()
+        loop.SetNormal(midClippingPlane.GetNormal())
+        loop.SetLoopClosureToAll()
+        loop.SetInputConnection(cutter.GetOutputPort())
+        loop.Update()
+
         # Extrusion towards annulus centroid to thicken leaflet walls inwards
+
         clean = vtk.vtkCleanPolyData()
         clean.SetInputConnection(clipMid.GetOutputPort())
         clean.Update()
@@ -1206,18 +1201,6 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         topMold = vtk.vtkPolyData()
         topMold.DeepCopy(holeFill.GetOutput())
-
-        # Fill across mid clip plane
-        cutter = vtk.vtkCutter()
-        cutter.SetCutFunction(midClippingPlane)
-        cutter.SetInputData(extractedSurface)
-        cutter.Update()
-
-        loop = vtk.vtkContourLoopExtraction()
-        loop.SetNormal(midClippingPlane.GetNormal())
-        loop.SetLoopClosureToAll()
-        loop.SetInputConnection(cutter.GetOutputPort())
-        loop.Update()
 
         # Add fill back on to clipped bottom mold and clean
         append = vtk.vtkAppendPolyData()
@@ -1289,110 +1272,6 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         return topMold, bottomMold
 
-    def getBasePlate(self):
-        # Load the base plate model from file if not already loaded
-        if self.moldBasePlate is None:
-            # Read in base plate file
-            reader = vtk.vtkSTLReader()
-            reader.SetFileName(os.path.dirname(slicer.modules.mvsegmenter.path) + "/Resources/moldBasePlate.stl")
-            reader.Update()
-
-            self.moldBasePlate = vtk.vtkPolyData()
-            self.moldBasePlate.DeepCopy(reader.GetOutput())
-
-        return self.moldBasePlate
-
-    def getBasePlateAlignmentTransform(self, basePlate, valveModel, depth):
-        if not basePlate or not valveModel:
-            logging.error("Missing parameter")
-            return
-
-        if valveModel.getAnnulusMarkupPositionByLabel('A') is None or valveModel.getAnnulusMarkupPositionByLabel('P') is None:
-            logging.error("Annulus points not defined. See Valve Quantification.")
-            return None
-
-        contourPlane = valveModel.getAnnulusContourPlane()
-
-        com = vtk.vtkCenterOfMass()
-        com.SetInputData(basePlate)
-        com.Update()
-        origin = com.GetCenter()
-
-        # Get AP plane bounds of base plate
-        plane = vtk.vtkPlane()
-        plane.SetNormal(1, 0, 0)
-        plane.SetOrigin(origin)
-
-        cutter = vtk.vtkCutter()
-        cutter.SetCutFunction(plane)
-
-        cutter.SetInputData(basePlate)
-        cutter.Update()
-        bounds = cutter.GetOutput().GetBounds()
-
-        basePlateAPPoints = vtk.vtkPoints()
-        basePlateAPPoints.InsertNextPoint(bounds[0], bounds[3], bounds[4])  # A
-        basePlateAPPoints.InsertNextPoint(bounds[0], bounds[2], bounds[4])  # P
-
-        # Get annulus A P points
-        annulusAPPoints = vtk.vtkPoints()
-        annulusAPPoints.InsertNextPoint(valveModel.getAnnulusMarkupPositionByLabel('A'))
-        annulusAPPoints.InsertNextPoint(valveModel.getAnnulusMarkupPositionByLabel('P'))
-
-        # Do best fit registration from base plate bounds to annulus A P points
-        landmarkReg = vtk.vtkLandmarkTransform()
-        landmarkReg.SetModeToRigidBody()
-        landmarkReg.SetSourceLandmarks(basePlateAPPoints)
-        landmarkReg.SetTargetLandmarks(annulusAPPoints)
-        landmarkReg.Update()
-
-        # Translate model after registration by depth
-        translate = vtk.vtkTransform()
-        translate.Translate(contourPlane[1] * depth)
-        translate.PreMultiply()
-        translate.Concatenate(landmarkReg)
-        translate.Update()
-
-        # TODO Align base plate with annulus normal ([0,0,1] translated, find transform to align to annulus normal, pre apply)
-        #
-
-        return translate
-
-    def getBasePlateHeights(self, basePlate):
-        if not basePlate:
-            logging.error("Missing parameter")
-            return
-
-        obb = vtk.vtkOBBTree()
-        obb.SetDataSet(basePlate)
-        obb.BuildLocator()
-
-        com = vtk.vtkCenterOfMass()
-        com.SetInputData(basePlate)
-        com.Update()
-        origin = com.GetCenter()
-
-        # Get AP plane bounds of base plate
-        plane = vtk.vtkPlane()
-        plane.SetNormal(1, 0, 0)
-        plane.SetOrigin(origin)
-
-        cutter = vtk.vtkCutter()
-        cutter.SetCutFunction(plane)
-
-        cutter.SetInputData(basePlate)
-        cutter.Update()
-        bounds = cutter.GetOutput().GetBounds()
-        thickHeight = bounds[5] - bounds[4]
-
-        A = np.array([bounds[0], bounds[3], bounds[4]])  # A
-
-        points = vtk.vtkPoints()
-        obb.IntersectWithLine(A + [0,0,-10], A + [0,0,10], points, None)
-        bounds = points.GetBounds()
-        thinHeight =  bounds[5] - bounds[4]
-
-        return thinHeight, thickHeight
 
 
 class MVSegmenterTest(ScriptedLoadableModuleTest):
