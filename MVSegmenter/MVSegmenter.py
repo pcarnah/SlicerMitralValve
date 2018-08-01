@@ -277,28 +277,22 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
 
         exportModelFormLayout = qt.QFormLayout(generateSurfaceMoldCollapsibleButton)
 
+        self.baseDepthSlider = ctk.ctkSliderWidget()
+        self.baseDepthSlider.singleStep = 0.1
+        self.baseDepthSlider.pageStep = 1
+        self.baseDepthSlider.minimum = -20
+        self.baseDepthSlider.maximum = 0
+        self.baseDepthSlider.value = -10
+        self.baseDepthSlider.decimals = 1
+        self.baseDepthSlider.tracking = False
+        self.baseDepthSlider.setToolTip("Adjust the depth of the base surface for the mold")
+        exportModelFormLayout.addRow("Base Clipping Depth", self.baseDepthSlider)
+
         # Export button
         self.generateMoldButton = qt.QPushButton("Generate Mold")
         self.generateMoldButton.toolTip = "Generate the inner surface mold in the segmentation node."
         self.generateMoldButton.enabled = False
         exportModelFormLayout.addRow(self.generateMoldButton)
-
-        # Generate base button
-        self.generateBasePlateButton = qt.QPushButton("Generate Base Plate")
-        self.generateBasePlateButton.toolTip = "Generate the mold base plate in the segmentation node."
-        self.generateBasePlateButton.enabled = False
-        exportModelFormLayout.addRow(self.generateBasePlateButton)
-
-        self.basePlateDepthSlider = ctk.ctkSliderWidget()
-        self.basePlateDepthSlider.singleStep = 0.1
-        self.basePlateDepthSlider.pageStep = 1
-        self.basePlateDepthSlider.minimum = -20
-        self.basePlateDepthSlider.maximum = 0
-        self.basePlateDepthSlider.value = -10
-        self.basePlateDepthSlider.decimals = 1
-        self.basePlateDepthSlider.tracking = False
-        self.basePlateDepthSlider.setToolTip("Adjust the depth of the base plate for the mold")
-        exportModelFormLayout.addRow("Base Plate Depth", self.basePlateDepthSlider)
 
         # Add vertical spacer
         self.layout.addSpacing(vSpace)
@@ -326,8 +320,6 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         self.generateSurfaceMarkups.connect('clicked(bool)', self.onGenerateSurfaceMarkups)
 
         self.generateMoldButton.connect('clicked(bool)', self.onExportModelButton)
-        self.generateBasePlateButton.connect('clicked(bool)', self.onGenerateBasePlate)
-        # self.basePlateDepthSlider.connect('valueChanged(double)', self.onExportModelButton)
 
         # Add vertical spacer
         self.layout.addStretch(1)
@@ -342,7 +334,6 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         self.initBPButton.enabled = self.heartValveSelector.currentNode() and self.inputSelector.currentNode() and self.outputSegmentationSelector.currentNode()
         self.generateSurfaceMarkups.enabled = self.heartValveSelector.currentNode() and self.outputSegmentationSelector.currentNode() and self.markupsSelector.currentNode()
         self.generateMoldButton.enabled = self.heartValveSelector.currentNode() and self.outputSegmentationSelector.currentNode()
-        self.generateBasePlateButton.enabled = self.heartValveSelector.currentNode() and self.outputSegmentationSelector.currentNode()
 
     def onInitBPButton(self):
         try:
@@ -462,7 +453,7 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
             qt.QApplication.setOverrideCursor(qt.Qt.WaitCursor)
 
             self.logic.generateSurfaceMold(self.outputSegmentationSelector.currentNode(),
-                                           self.heartValveSelector.currentNode(), float(self.basePlateDepthSlider.value))
+                                           self.heartValveSelector.currentNode(), float(self.baseDepthSlider.value))
 
         finally:
             qt.QApplication.restoreOverrideCursor()
