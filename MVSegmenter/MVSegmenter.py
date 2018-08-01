@@ -955,7 +955,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         # Create clipped leaflet mold across middle
         baseClippingPlane = vtk.vtkPlane()
         baseClippingPlane.SetNormal(contourPlane[1])
-        baseClippingPlane.SetOrigin(contourPlane[0] + [0,0,depth])
+        baseClippingPlane.SetOrigin(contourPlane[0] + contourPlane[1] * depth)
 
         midClippingPlane = vtk.vtkPlane()
         midClippingPlane.SetNormal(contourPlane[1])
@@ -982,6 +982,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         mold = vtk.vtkPolyData()
         mold.DeepCopy(holeFill.GetOutput())
 
+
         self.pushModelToSegmentation(segNode, mold, 'Final_Mold')
 
         # Remake closed surface representation after adding mold (makes it generated model from labelmap)
@@ -998,65 +999,82 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
             logging.error("Annulus contour not defined")
             return None
 
+        annulusPlane = valveModel.getAnnulusContourPlane()
+
         leafletModel = segNode.GetClosedSurfaceRepresentation('Leaflet Segmentation')
-        if leafletModel is None:
+        bpModel = segNode.GetClosedSurfaceRepresentation('BP Segmentation')
+        if leafletModel is None or bpModel is None:
             logging.error("Missing segmentation")
             return None
+
+        imp = vtk.vtkImplicitPolyDataDistance()
+        imp.SetInput(bpModel)
+
+        clip = vtk.vtkClipPolyData()
+        clip.SetClipFunction(imp)
+        clip.GenerateClipScalarsOn()
+        clip.InsideOutOn()
+        clip.SetValue(4.0)
+        clip.SetInputData(leafletModel)
+        clip.Update()
+
+        clipped = vtk.vtkPolyData()
+        clipped.DeepCopy(clip.GetOutput())
 
         # OBBTree for determining self intersection of rays
         obb = vtk.vtkOBBTree()
         obb.SetDataSet(leafletModel)
         obb.BuildLocator()
 
+        locator = vtk.vtkPointLocator()
+        locator.SetDataSet(bpModel)
+        locator.BuildLocator()
+
         # Extract cells that use points where the line from the point to the annulus contour centroid does not self intersect
         a0 = np.zeros(3)
-        contourPlane = valveModel.getAnnulusContourPlane()
+        p = annulusPlane[0] + annulusPlane[1] * 2
         points = vtk.vtkPoints()
-        ids = vtk.vtkIdList()
-        cellids = vtk.vtkIdList()
-        for i in range(leafletModel.GetNumberOfPoints()):
-            leafletModel.GetPoint(i, a0)
-            r = obb.IntersectWithLine(a0, contourPlane[0], points, None)
-            # If only 1 intersection point, line does not cross through leaflet model as the line always intersects at a0
-            if points.GetNumberOfPoints() == 1:
-                leafletModel.GetPointCells(i, cellids)
-                for j in range(cellids.GetNumberOfIds()):
-                    index = ids.InsertUniqueId(cellids.GetId(j))
+        normals = clipped.GetPointData().GetNormals()
+        bpNormals = bpModel.GetPointData().GetNormals()
+        scalars = vtk.vtkFloatArray()
+        scalars.SetNumberOfValues(clipped.GetNumberOfPoints())
+        for i in range(clipped.GetNumberOfPoints()):
+            clipped.GetPoint(i, a0)
+            # Point is above annulus plane, compute scalar as angle to plane normal
+            if np.dot(annulusPlane[1], a0 - p) > 0:
+                r = obb.IntersectWithLine(a0, annulusPlane[0], points, None)
+                # If only 1 intersection point, line does not cross through leaflet model as the line always intersects at a0
+                if points.GetNumberOfPoints() == 1:
+                    scalars.SetValue(i, 10)
+                else:
+                    scalars.SetValue(i, -10)
+                # n = np.array(normals.GetTuple(i))
+                # angle = math.acos(np.dot(n, annulusPlane[1]) / np.linalg.norm(n) / np.linalg.norm(annulusPlane[1]))
+                # scalars.SetValue(i, angle)
+            else:
+                closestPoint = locator.FindClosestPoint(a0)
+                v = np.array(bpNormals.GetTuple(closestPoint))
+                n = np.array(normals.GetTuple(i))
+                angle = math.acos(np.dot(n, v) / np.linalg.norm(n) / np.linalg.norm(v))
+                scalars.SetValue(i, angle - 0.3)
 
-        # Convert vtkIdList to vtkIdTypeArray
-        idsarray = vtk.vtkIdTypeArray()
-        for i in range(ids.GetNumberOfIds()):
-            index = idsarray.InsertNextValue(ids.GetId(i))
+        # Scalars now angles in radians that we can threshold
+        clipped.GetPointData().SetScalars(scalars)
 
-        # Extract only the needed cells
-        selectionNode = vtk.vtkSelectionNode()
-        selectionNode.SetFieldType(vtk.vtkSelectionNode.CELL)
-        selectionNode.SetContentType(vtk.vtkSelectionNode.INDICES)
-        selectionNode.SetSelectionList(idsarray)
+        clip2 = vtk.vtkClipPolyData()
+        clip2.GenerateClipScalarsOff()
+        clip2.SetValue(1.3)  # 100 degrees threshold in radians
+        clip2.SetInputData(clipped)
 
-        selection = vtk.vtkSelection()
-        selection.AddNode(selectionNode)
-
-        extractSelection = vtk.vtkExtractSelection()
-        extractSelection.SetInputData(0, leafletModel)
-        extractSelection.SetInputData(1, selection)
-        extractSelection.Update()
-
-        # Keep only largest connected region (removes small spurious sections disconnected from rest)
         conn = vtk.vtkConnectivityFilter()
+        conn.SetInputConnection(clip2.GetOutputPort())
         conn.SetExtractionModeToLargestRegion()
-        conn.SetInputConnection(extractSelection.GetOutputPort())
         conn.Update()
-
-        # Convert back to polydata from unstructured grid
-        geom = vtk.vtkGeometryFilter()
-        geom.SetInputConnection(conn.GetOutputPort())
-        geom.Update()
 
         # Fill small holes resulting from extraction and clean poly data
         fill = vtk.vtkFillHolesFilter()
-        fill.SetHoleSize(2)
-        fill.SetInputConnection(geom.GetOutputPort())
+        fill.SetHoleSize(3)
+        fill.SetInputConnection(conn.GetOutputPort())
         fill.Update()
 
         clean = vtk.vtkCleanPolyData()
@@ -1065,7 +1083,6 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         # Fix normals
         normClean = vtk.vtkPolyDataNormals()
-        normClean.FlipNormalsOn()
         normClean.ConsistencyOn()
         normClean.SetInputConnection(clean.GetOutputPort())
         normClean.Update()
