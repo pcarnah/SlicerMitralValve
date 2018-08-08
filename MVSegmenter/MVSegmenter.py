@@ -240,7 +240,7 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         manualAdjCollapsibleButton = ctk.ctkCollapsibleButton()
         manualAdjCollapsibleButton.text = "Manual Adjustment"
         manualAdjCollapsibleButton.collapsed = True
-        self.layout.addWidget(manualAdjCollapsibleButton)
+        # self.layout.addWidget(manualAdjCollapsibleButton)
 
         manualAdjFormLayout = qt.QFormLayout(manualAdjCollapsibleButton)
 
@@ -332,7 +332,7 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
 
     def onSelect(self):
         self.initBPButton.enabled = self.heartValveSelector.currentNode() and self.inputSelector.currentNode() and self.outputSegmentationSelector.currentNode()
-        self.generateSurfaceMarkups.enabled = self.heartValveSelector.currentNode() and self.outputSegmentationSelector.currentNode() and self.markupsSelector.currentNode()
+        # self.generateSurfaceMarkups.enabled = self.heartValveSelector.currentNode() and self.outputSegmentationSelector.currentNode() and self.markupsSelector.currentNode()
         self.generateMoldButton.enabled = self.heartValveSelector.currentNode() and self.outputSegmentationSelector.currentNode()
 
     def onInitBPButton(self):
@@ -998,6 +998,8 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
             logging.error("Missing segmentation")
             return None
 
+        # Extract surface within a distance of 4 from bp segmentation
+        # Done for performance reasons as it quickly eliminates polydata that we do not need and makes the loop phase faster
         imp = vtk.vtkImplicitPolyDataDistance()
         imp.SetInput(bpModel)
 
@@ -1021,7 +1023,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         locator.SetDataSet(bpModel)
         locator.BuildLocator()
 
-        # Extract cells that use points where the line from the point to the annulus contour centroid does not self intersect
+        # Loop over remaining points and build scalar array using different techniques for top and bottom half
         a0 = np.zeros(3)
         p = annulusPlane[0] + annulusPlane[1] * 2
         points = vtk.vtkPoints()
@@ -1031,30 +1033,31 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         scalars.SetNumberOfValues(clipped.GetNumberOfPoints())
         for i in range(clipped.GetNumberOfPoints()):
             clipped.GetPoint(i, a0)
-            # Point is above annulus plane, compute scalar as angle to plane normal
             if np.dot(annulusPlane[1], a0 - p) > 0:
+                # Point is above annulus plane, set scalar based on self intersection (scalar value will determine clipping)
+
                 r = obb.IntersectWithLine(a0, annulusPlane[0], points, None)
                 # If only 1 intersection point, line does not cross through leaflet model as the line always intersects at a0
                 if points.GetNumberOfPoints() == 1:
-                    scalars.SetValue(i, 10)
+                    scalars.SetValue(i, 10)     # Set scalar to large value so point will be kept
                 else:
-                    scalars.SetValue(i, -10)
-                # n = np.array(normals.GetTuple(i))
-                # angle = math.acos(np.dot(n, annulusPlane[1]) / np.linalg.norm(n) / np.linalg.norm(annulusPlane[1]))
-                # scalars.SetValue(i, angle)
+                    scalars.SetValue(i, -10)    # Set scalar to small value so point will be discarded
             else:
+                # Point is below annulus plane
+                # Get the closest point on bp surface, find angle between 2 normals in radians
                 closestPoint = locator.FindClosestPoint(a0)
                 v = np.array(bpNormals.GetTuple(closestPoint))
                 n = np.array(normals.GetTuple(i))
                 angle = math.acos(np.dot(n, v) / np.linalg.norm(n) / np.linalg.norm(v))
-                scalars.SetValue(i, angle - 0.3)
+                scalars.SetValue(i, angle)      # Set scalar to angle
 
         # Scalars now angles in radians that we can threshold
         clipped.GetPointData().SetScalars(scalars)
 
+        # Clip based on scalar values (keep scalars bigger than value)
         clip2 = vtk.vtkClipPolyData()
         clip2.GenerateClipScalarsOff()
-        clip2.SetValue(1.3)  # 100 degrees threshold in radians
+        clip2.SetValue(1.74533)  # 100 degrees threshold in radians
         clip2.SetInputData(clipped)
 
         conn = vtk.vtkConnectivityFilter()
