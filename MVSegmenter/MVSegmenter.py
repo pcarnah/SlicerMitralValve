@@ -608,6 +608,8 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         centroid = centroid / markups.GetNumberOfFiducials()
         centroid = centroid + valveModel.getAnnulusContourPlane()[1] * -10
         centroid = np.array(self.rasToIJK(centroid, inputVolume))
+        if centroid[2] <= 0:
+            centroid[2] = 1
 
         # Run fast marching based on annulus center
         fastMarching = sitk.FastMarchingImageFilter()
