@@ -983,7 +983,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         segNode.CreateClosedSurfaceRepresentation()
 
 
-    def extractInnerSurfaceModel(self, segNode, valveModel):
+    def extractInnerSurfaceModel(self, segNode, valveModel, segName = 'Leaflet Segmentation'):
         if not segNode or not valveModel:
             logging.error("Missing parameter")
             return None
@@ -994,7 +994,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         annulusPlane = valveModel.getAnnulusContourPlane()
 
-        leafletModel = segNode.GetClosedSurfaceRepresentation('Leaflet Segmentation')
+        leafletModel = segNode.GetClosedSurfaceRepresentation(segName)
         bpModel = segNode.GetClosedSurfaceRepresentation('BP Segmentation')
         if leafletModel is None or bpModel is None:
             logging.error("Missing segmentation")
@@ -1109,10 +1109,9 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         pos = np.zeros(3)
         points = vtk.vtkPoints()
         projPoints = vtk.vtkPoints()
-        # Take center point below actual for better projection of annulus onto leaflet mold (by Olivia's judgement)
-        # Needs more feedback to fine tune or potentially slider selector
-        # TODO Slider with auto update for annulus projection
-        center = contourPlane[0] + -15 * contourPlane[1]
+
+        # Project annulus inwards towards center
+        center = contourPlane[0]
         for i in range(annulusMarkups.GetNumberOfFiducials()):
             annulusMarkups.GetNthFiducialPosition(i, pos)
             r = obb.IntersectWithLine(pos + pos - center, center, points, None)
