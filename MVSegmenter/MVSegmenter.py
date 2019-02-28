@@ -294,6 +294,11 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         self.generateMoldButton.enabled = False
         exportModelFormLayout.addRow(self.generateMoldButton)
 
+        self.exportMoldButton = qt.QPushButton("Export Mold to Model")
+        self.exportMoldButton.toolTip = "Export mold segmentation node to model."
+        self.exportMoldButton.enabled = False
+        exportModelFormLayout.addRow(self.exportMoldButton)
+
         # Add vertical spacer
         self.layout.addSpacing(vSpace)
 
@@ -319,7 +324,8 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         self.markupsSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onSelect)
         self.generateSurfaceMarkups.connect('clicked(bool)', self.onGenerateSurfaceMarkups)
 
-        self.generateMoldButton.connect('clicked(bool)', self.onExportModelButton)
+        self.generateMoldButton.connect('clicked(bool)', self.onGenerateModelButton)
+        self.exportMoldButton.connect('clicked(bool)', self.onExportModelButton)
 
         # Add vertical spacer
         self.layout.addStretch(1)
@@ -333,7 +339,9 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
     def onSelect(self):
         self.initBPButton.enabled = self.heartValveSelector.currentNode() and self.inputSelector.currentNode() and self.outputSegmentationSelector.currentNode()
         # self.generateSurfaceMarkups.enabled = self.heartValveSelector.currentNode() and self.outputSegmentationSelector.currentNode() and self.markupsSelector.currentNode()
-        self.generateMoldButton.enabled = self.heartValveSelector.currentNode() and self.outputSegmentationSelector.currentNode()
+        self.generateMoldButton.enabled = self.heartValveSelector.currentNode() and self.outputSegmentationSelector.currentNode() and self.inputSelector.currentNode()
+        self.exportMoldButton.enabled = self.heartValveSelector.currentNode() and self.outputSegmentationSelector.currentNode() \
+                                        and self.outputSegmentationSelector.currentNode().GetClosedSurfaceRepresentation('Final_Mold')
 
     def onInitBPButton(self):
         try:
@@ -447,13 +455,26 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
                                                     self.heartValveSelector.currentNode(),
                                                     self.markupsSelector.currentNode())
 
-    def onExportModelButton(self):
+    def onGenerateModelButton(self):
         try:
             # This can be a long operation - indicate it to the user
             qt.QApplication.setOverrideCursor(qt.Qt.WaitCursor)
 
             self.logic.generateSurfaceMold(self.outputSegmentationSelector.currentNode(),
-                                           self.heartValveSelector.currentNode(), float(self.baseDepthSlider.value))
+                                           self.heartValveSelector.currentNode(),
+                                           float(self.baseDepthSlider.value),
+                                           self.inputSelector.currentNode())
+            self.onSelect()
+
+        finally:
+            qt.QApplication.restoreOverrideCursor()
+
+    def onExportModelButton(self):
+        try:
+            # This can be a long operation - indicate it to the user
+            qt.QApplication.setOverrideCursor(qt.Qt.WaitCursor)
+
+            self.logic.exportSurfaceMold(self.outputSegmentationSelector.currentNode())
 
         finally:
             qt.QApplication.restoreOverrideCursor()
@@ -923,9 +944,11 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
             model)
         segNode.GetSegmentation().AddSegment(segment, name)
 
-    def generateSurfaceMold(self, segNode, heartValveNode, depth):
+
+
+    def generateSurfaceMold(self, segNode, heartValveNode, depth, volume):
         # Check that parameters exist
-        if not segNode or not heartValveNode or not depth:
+        if not segNode or not heartValveNode or not depth or not volume:
             logging.error("Missing parameter")
             return None
 
@@ -943,6 +966,8 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         self.pushModelToSegmentation(segNode, projectedAnnulus, 'Projected_Annulus')
 
+        self.addOrUpdateModel(extractedSurface, 'extractedSurface')
+
         contourPlane = valveModel.getAnnulusContourPlane()
 
         # Create clipped leaflet mold across middle
@@ -952,7 +977,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         midClippingPlane = vtk.vtkPlane()
         midClippingPlane.SetNormal(contourPlane[1])
-        midClippingPlane.SetOrigin(contourPlane[0])
+        midClippingPlane.SetOrigin(contourPlane[0] + (contourPlane[1] * 2))
 
         topMold, bottomMold = self.buildMoldHalves(extractedSurface, midClippingPlane, baseClippingPlane)
 
@@ -963,24 +988,108 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         append.AddInputData(bottomMold)
         append.Update()
 
-        clean = vtk.vtkCleanPolyData()
-        clean.SetInputConnection(append.GetOutputPort())
-        clean.Update()
-
-        holeFill = vtk.vtkFillHolesFilter()
-        holeFill.SetInputConnection(clean.GetOutputPort())
-        holeFill.SetHoleSize(10000)
-        holeFill.Update()
+        normAuto = vtk.vtkPolyDataNormals()
+        normAuto.ConsistencyOn()
+        normAuto.SetInputConnection(append.GetOutputPort())
+        normAuto.Update()
 
         mold = vtk.vtkPolyData()
-        mold.DeepCopy(holeFill.GetOutput())
-
+        mold.DeepCopy(normAuto.GetOutput())
 
         self.pushModelToSegmentation(segNode, mold, 'Final_Mold')
 
         # Remake closed surface representation after adding mold (makes it generated model from labelmap)
         segNode.RemoveClosedSurfaceRepresentation()
         segNode.CreateClosedSurfaceRepresentation()
+
+        # Create segment editor to get access to effects
+        segmentEditorWidget = slicer.qMRMLSegmentEditorWidget()
+        segmentEditorWidget.setMRMLScene(slicer.mrmlScene)
+        segmentEditorNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentEditorNode")
+        segmentEditorNode.SetOverwriteMode(segmentEditorNode.OverwriteNone)
+        segmentEditorWidget.setMRMLSegmentEditorNode(segmentEditorNode)
+        segmentEditorWidget.setSegmentationNode(segNode)
+        segmentEditorWidget.setMasterVolumeNode(volume)
+        segmentEditorWidget.setCurrentSegmentID('Final_Mold')
+
+        # Smoothing
+        segmentEditorWidget.setActiveEffectByName("Smoothing")
+        effect = segmentEditorWidget.activeEffect()
+        effect.setParameter("SmoothingMethod", "GAUSSIAN")
+        effect.setParameter("GaussianStandardDeviationMm", 0.8)
+        effect.self().onApply()
+
+        # Islands
+        # segmentEditorWidget.setActiveEffectByName("Islands")
+        # effect = segmentEditorWidget.activeEffect()
+        # effect.setParameter("Operation", "KEEP_LARGEST_ISLAND")
+        # effect.self().onApply()
+
+        # Clean up
+        segmentEditorWidget = None
+        slicer.mrmlScene.RemoveNode(segmentEditorNode)
+
+    def exportSurfaceMold(self, segNode):
+
+        # Get segmentation closed surface representations
+        segMold = segNode.GetClosedSurfaceRepresentation('Final_Mold')
+        annulusMold = segNode.GetClosedSurfaceRepresentation('Projected_Annulus')
+        if not segMold or not annulusMold:
+            logging.error("Missing mold segmentation")
+            return
+
+        # Fill holes (remove boudnary edges) and clean
+        holeFill = vtk.vtkFillHolesFilter()
+        holeFill.SetInputData(segMold)
+        holeFill.SetHoleSize(holeFill.GetHoleSizeMaxValue())
+        holeFill.Update()
+
+        clean = vtk.vtkCleanPolyData()
+        clean.SetInputConnection(holeFill.GetOutputPort())
+        clean.Update()
+
+        normAuto = vtk.vtkPolyDataNormals()
+        normAuto.ConsistencyOff()
+        normAuto.SetInputConnection(clean.GetOutputPort())
+        normAuto.Update()
+
+        # Decimate to 80%
+        decimate = vtk.vtkDecimatePro()
+        decimate.SetTargetReduction(0.8)
+        decimate.SetInputConnection(normAuto.GetOutputPort())
+        decimate.Update()
+
+        holeFill = vtk.vtkFillHolesFilter()
+        holeFill.SetInputConnection(decimate.GetOutputPort())
+        holeFill.SetHoleSize(holeFill.GetHoleSizeMaxValue())
+        holeFill.Update()
+
+        normAuto = vtk.vtkPolyDataNormals()
+        normAuto.ConsistencyOn()
+        normAuto.AutoOrientNormalsOn()
+        normAuto.SetInputConnection(holeFill.GetOutputPort())
+        normAuto.Update()
+
+
+        # Perform boolean operations to get the base mold with the annulus projection
+        boolFilter = vtk.vtkLoopBooleanPolyDataFilter()
+        boolFilter.SetInputConnection(0, normAuto.GetOutputPort())
+        boolFilter.SetInputData(1, annulusMold)
+
+        boolFilter.SetOperationToDifference()
+        boolFilter.Update()
+
+        moldModel = vtk.vtkPolyData()
+        moldModel.DeepCopy(boolFilter.GetOutput())
+
+        self.addOrUpdateModel(moldModel, 'Final_Mold_Model', segNode.GetTransformNodeID())
+
+        boolFilter.SetOperationToIntersection()
+        boolFilter.Update()
+
+        annulusModel = vtk.vtkPolyData()
+        annulusModel.DeepCopy(boolFilter.GetOutput())
+        self.addOrUpdateModel(annulusModel, 'Projected_Annulus_Model', segNode.GetTransformNodeID())
 
 
     def extractInnerSurfaceModel(self, segNode, valveModel, segName = 'Leaflet Segmentation'):
@@ -994,11 +1103,28 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         annulusPlane = valveModel.getAnnulusContourPlane()
 
+
         leafletModel = segNode.GetClosedSurfaceRepresentation(segName)
         bpModel = segNode.GetClosedSurfaceRepresentation('BP Segmentation')
         if leafletModel is None or bpModel is None:
             logging.error("Missing segmentation")
             return None
+
+        # Decimate leaflet and BP polydata for efficiency
+        decimate = vtk.vtkDecimatePro()
+        decimate.SetTargetReduction(0.5)
+        decimate.PreserveTopologyOn()
+        decimate.BoundaryVertexDeletionOff()
+
+        decimate.SetInputData(leafletModel)
+        decimate.Update()
+        leafletModel = vtk.vtkPolyData()
+        leafletModel.DeepCopy(decimate.GetOutput())
+
+        decimate.SetInputData(bpModel)
+        decimate.Update()
+        bpModel = vtk.vtkPolyData()
+        bpModel.DeepCopy(decimate.GetOutput())
 
         # Extract surface within a distance of 4 from bp segmentation
         # Done for performance reasons as it quickly eliminates polydata that we do not need and makes the loop phase faster
@@ -1080,6 +1206,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         # Fix normals
         normClean = vtk.vtkPolyDataNormals()
         normClean.ConsistencyOn()
+        normClean.FlipNormalsOn()
         normClean.SetInputConnection(clean.GetOutputPort())
         normClean.Update()
 
@@ -1175,49 +1302,49 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         loop.SetInputConnection(cutter.GetOutputPort())
         loop.Update()
 
+        tri = vtk.vtkTriangleFilter()
+        tri.SetInputConnection(loop.GetOutputPort())
+        tri.Update()
+
         # Extrusion towards annulus centroid to thicken leaflet walls inwards
 
         clean = vtk.vtkCleanPolyData()
         clean.SetInputConnection(clipMid.GetOutputPort())
         clean.Update()
 
-        holeFill = vtk.vtkFillHolesFilter()
-        holeFill.SetInputConnection(clean.GetOutputPort())
-        holeFill.SetHoleSize(5)
-        holeFill.Update()
-
         extrudeIn = vtk.vtkLinearExtrusionFilter()
         extrudeIn.CappingOn()
         extrudeIn.SetExtrusionTypeToPointExtrusion()
-        extrudeIn.SetScaleFactor(-0.5)
+        extrudeIn.SetScaleFactor(-0.6)
         extrudeIn.SetExtrusionPoint(midClippingPlane.GetOrigin())
-        extrudeIn.SetInputConnection(holeFill.GetOutputPort())
+        extrudeIn.SetInputConnection(clean.GetOutputPort())
         extrudeIn.Update()
+
+        normAuto = vtk.vtkPolyDataNormals()
+        normAuto.ConsistencyOn()
+        normAuto.AutoOrientNormalsOn()
+        normAuto.SetInputConnection(extrudeIn.GetOutputPort())
+        normAuto.Update()
 
         # Need clean then fill to close extruded model
         clean = vtk.vtkCleanPolyData()
-        clean.SetInputConnection(extrudeIn.GetOutputPort())
+        clean.SetInputConnection(normAuto.GetOutputPort())
         clean.Update()
-
-        holeFill = vtk.vtkFillHolesFilter()
-        holeFill.SetInputConnection(clean.GetOutputPort())
-        holeFill.SetHoleSize(10000)
-        holeFill.Update()
 
         # Make normals point outwards for final model
         normAuto = vtk.vtkPolyDataNormals()
-        normAuto.AutoOrientNormalsOn()
         normAuto.ConsistencyOn()
-        normAuto.SetInputConnection(holeFill.GetOutputPort())
+        normAuto.AutoOrientNormalsOn()
+        normAuto.SetInputConnection(clean.GetOutputPort())
         normAuto.Update()
 
         topMold = vtk.vtkPolyData()
-        topMold.DeepCopy(holeFill.GetOutput())
+        topMold.DeepCopy(normAuto.GetOutput())
 
         # Add fill back on to clipped bottom mold and clean
         append = vtk.vtkAppendPolyData()
         append.AddInputConnection(clipMid.GetClippedOutputPort())
-        append.AddInputConnection(loop.GetOutputPort())
+        append.AddInputConnection(tri.GetOutputPort())
         append.Update()
 
         clean = vtk.vtkCleanPolyData()
@@ -1233,8 +1360,14 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         extrudeDown.CappingOff()
         extrudeDown.Update()
 
+        normAuto = vtk.vtkPolyDataNormals()
+        normAuto.ConsistencyOn()
+        normAuto.AutoOrientNormalsOn()
+        normAuto.SetInputConnection(extrudeDown.GetOutputPort())
+        normAuto.Update()
+
         append = vtk.vtkAppendPolyData()
-        append.AddInputConnection(extrudeDown.GetOutputPort())
+        append.AddInputConnection(normAuto.GetOutputPort())
         append.AddInputConnection(clean.GetOutputPort())
         append.Update()
 
@@ -1242,21 +1375,16 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         clean.SetInputConnection(append.GetOutputPort())
         clean.Update()
 
-        holeFill = vtk.vtkFillHolesFilter()
-        holeFill.SetInputConnection(clean.GetOutputPort())
-        holeFill.SetHoleSize(10000)
-        holeFill.Update()
-
         # Perform the bottom clipping at the specified depth
         clipBase = vtk.vtkClipPolyData()
         clipBase.SetClipFunction(baseClippingPlane)
-        clipBase.SetInputConnection(holeFill.GetOutputPort())
+        clipBase.SetInputConnection(clean.GetOutputPort())
         clipBase.Update()
 
         # Fill bottom clip plane
         cutter = vtk.vtkCutter()
         cutter.SetCutFunction(baseClippingPlane)
-        cutter.SetInputConnection(holeFill.GetOutputPort())
+        cutter.SetInputConnection(clean.GetOutputPort())
         cutter.Update()
 
         loop = vtk.vtkContourLoopExtraction()
@@ -1265,24 +1393,46 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         loop.SetInputConnection(cutter.GetOutputPort())
         loop.Update()
 
+        tri = vtk.vtkTriangleFilter()
+        tri.SetInputConnection(loop.GetOutputPort())
+        tri.Update()
+
+        reverse = vtk.vtkReverseSense()
+        reverse.SetInputConnection(tri.GetOutputPort())
+        reverse.Update()
+
         appendBottom = vtk.vtkAppendPolyData()
         appendBottom.AddInputConnection(clipBase.GetOutputPort())
-        appendBottom.AddInputConnection(loop.GetOutputPort())
+        appendBottom.AddInputConnection(reverse.GetOutputPort())
         appendBottom.Update()
 
         clean = vtk.vtkCleanPolyData()
         clean.SetInputConnection(appendBottom.GetOutputPort())
         clean.Update()
 
-        holeFill = vtk.vtkFillHolesFilter()
-        holeFill.SetInputConnection(clean.GetOutputPort())
-        holeFill.SetHoleSize(10000)
-        holeFill.Update()
+        normAuto = vtk.vtkPolyDataNormals()
+        normAuto.ConsistencyOn()
+        normAuto.AutoOrientNormalsOn()
+        normAuto.SetInputConnection(clean.GetOutputPort())
+        normAuto.Update()
 
         bottomMold = vtk.vtkPolyData()
-        bottomMold.DeepCopy(holeFill.GetOutput())
+        bottomMold.DeepCopy(normAuto.GetOutput())
 
         return topMold, bottomMold
+
+    def addOrUpdateModel(self, model, name, tformId = None):
+        node = slicer.util.getFirstNodeByName(name)
+        if not node:
+            node = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLModelNode', name)
+            node.CreateDefaultDisplayNodes()
+
+        node.SetAndObservePolyData(model)
+
+        if tformId:
+            node.SetAndObserveTransformNodeID(tformId)
+
+
 
 
 
