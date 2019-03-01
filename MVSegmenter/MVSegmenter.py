@@ -966,8 +966,6 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         self.pushModelToSegmentation(segNode, projectedAnnulus, 'Projected_Annulus')
 
-        self.addOrUpdateModel(extractedSurface, 'extractedSurface')
-
         contourPlane = valveModel.getAnnulusContourPlane()
 
         # Create clipped leaflet mold across middle
@@ -1019,12 +1017,6 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         effect.setParameter("GaussianStandardDeviationMm", 0.8)
         effect.self().onApply()
 
-        # Islands
-        # segmentEditorWidget.setActiveEffectByName("Islands")
-        # effect = segmentEditorWidget.activeEffect()
-        # effect.setParameter("Operation", "KEEP_LARGEST_ISLAND")
-        # effect.self().onApply()
-
         # Clean up
         segmentEditorWidget = None
         slicer.mrmlScene.RemoveNode(segmentEditorNode)
@@ -1048,9 +1040,15 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         clean.SetInputConnection(holeFill.GetOutputPort())
         clean.Update()
 
+        # Remove disconnected fragments
+        conn = vtk.vtkConnectivityFilter()
+        conn.SetInputConnection(clean.GetOutputPort())
+        conn.SetExtractionModeToLargestRegion()
+        conn.Update()
+
         normAuto = vtk.vtkPolyDataNormals()
         normAuto.ConsistencyOff()
-        normAuto.SetInputConnection(clean.GetOutputPort())
+        normAuto.SetInputConnection(conn.GetOutputPort())
         normAuto.Update()
 
         # Decimate to 80%
@@ -1284,6 +1282,8 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         return annulusFittedModel
 
     def buildMoldHalves(self, extractedSurface, midClippingPlane, baseClippingPlane):
+
+        # Split top and bottom halves of surface
         clipMid = vtk.vtkClipPolyData()
         clipMid.SetClipFunction(midClippingPlane)
         clipMid.SetInputData(extractedSurface)
@@ -1397,6 +1397,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         tri.SetInputConnection(loop.GetOutputPort())
         tri.Update()
 
+        # Flip bottom surface so normal points out
         reverse = vtk.vtkReverseSense()
         reverse.SetInputConnection(tri.GetOutputPort())
         reverse.Update()
