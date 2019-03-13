@@ -499,6 +499,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
     def __init__(self):
         ScriptedLoadableModuleLogic.__init__(self)
         self._speedImg = None
+        self._speedImgRefNode = None
         self._levelSet = None
         self._bpLevelSet = None
 
@@ -509,70 +510,6 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         self.moldBasePlate = None
 
-    def hasImageData(self, volumeNode):
-        """This is an example logic method that
-        returns true if the passed in volume
-        node has valid image data
-        """
-        if not volumeNode:
-            logging.debug('hasImageData failed: no volume node')
-            return False
-        if volumeNode.GetImageData() is None:
-            logging.debug('hasImageData failed: no image data in volume node')
-            return False
-        return True
-
-    def isValidInputOutputData(self, inputVolumeNode, outputVolumeNode):
-        """Validates if the output is not the same as input
-        """
-        if not inputVolumeNode:
-            logging.debug('isValidInputOutputData failed: no input volume node defined')
-            return False
-        if not outputVolumeNode:
-            logging.debug('isValidInputOutputData failed: no output volume node defined')
-            return False
-        if inputVolumeNode.GetID() == outputVolumeNode.GetID():
-            logging.debug(
-                'isValidInputOutputData failed: input and output volume is the same. Create a new volume for output to avoid this error.')
-            return False
-        return True
-
-    def takeScreenshot(self, name, description, type=-1):
-        # show the message even if not taking a screen shot
-        slicer.util.delayDisplay(
-            'Take screenshot: ' + description + '.\nResult is available in the Annotations module.', 3000)
-
-        lm = slicer.app.layoutManager()
-        # switch on the type to get the requested window
-        widget = 0
-        if type == slicer.qMRMLScreenShotDialog.FullLayout:
-            # full layout
-            widget = lm.viewport()
-        elif type == slicer.qMRMLScreenShotDialog.ThreeD:
-            # just the 3D window
-            widget = lm.threeDWidget(0).threeDView()
-        elif type == slicer.qMRMLScreenShotDialog.Red:
-            # red slice window
-            widget = lm.sliceWidget("Red")
-        elif type == slicer.qMRMLScreenShotDialog.Yellow:
-            # yellow slice window
-            widget = lm.sliceWidget("Yellow")
-        elif type == slicer.qMRMLScreenShotDialog.Green:
-            # green slice window
-            widget = lm.sliceWidget("Green")
-        else:
-            # default to using the full window
-            widget = slicer.util.mainWindow()
-            # reset the type so that the node is set correctly
-            type = slicer.qMRMLScreenShotDialog.FullLayout
-
-        # grab and convert to vtk image data
-        qimage = ctk.ctkWidgetsUtils.grabWidget(widget)
-        imageData = vtk.vtkImageData()
-        slicer.qMRMLUtils().qImageToVtkImageData(qimage, imageData)
-
-        annotationLogic = slicer.modules.annotations.logic()
-        annotationLogic.CreateSnapShot(name, description, type, 1, imageData)
 
     def initBPSeg(self, inputVolume, heartValveNode, outputSeg):
         """
@@ -592,6 +529,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         if valveModel.getProbeToRasTransformNode():
             outputSeg.SetAndObserveTransformNodeID(valveModel.getProbeToRasTransformNode().GetID())
 
+        self._speedImgRefNode = inputVolume
         # calculate speed image from input volume
         # Uses DiscreteGaussian -> GradientMagnitude -> Sigmoid filters
         speedImg = sitkUtils.PullVolumeFromSlicer(inputVolume)
@@ -837,6 +775,33 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
                                                                               segmentationIds)
 
         slicer.mrmlScene.RemoveNode(tempNode)
+
+    def pullITKImageFromSegmentation(self, segmentationNode, segmentId, refNode = None):
+        if not segmentationNode or not segmentId:
+            logging.error("Missing parameter")
+            return
+
+        if segmentationNode.GetSegmentation().GetSegmentIndex(segmentId) == -1:
+            logging.error('Segment not found: ' + segmentId)
+            return
+
+        # Create temporary label map node to get itk image from slicer volume
+        tempNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLabelMapVolumeNode', 'temp_labelmap')
+        tempNode.SetAndObserveTransformNodeID(segmentationNode.GetTransformNodeID())
+
+        segmentationIds = vtk.vtkStringArray()
+        segmentationIds.InsertNextValue(segmentId)
+
+        # Export segmentation labelmap to temporary node
+        if refNode:
+            slicer.modules.segmentations.logic().ExportSegmentsToLabelmapNode(segmentationNode, segmentationIds,
+                                                                              tempNode, refNode)
+        else:
+            slicer.modules.segmentations.logic().ExportSegmentsToLabelmapNode(segmentationNode, segmentationIds,
+                                                                              tempNode)
+        # Get the itk image
+        return sitkUtils.PullVolumeFromSlicer(tempNode)
+
 
     def rasToIJK(self, point, volume):
         matrix = vtk.vtkMatrix4x4()
