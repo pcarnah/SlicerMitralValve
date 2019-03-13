@@ -431,24 +431,34 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
             qt.QApplication.restoreOverrideCursor()
 
     def onUndoButtonBP(self):
-        self.logic.undoBPIteration(self.outputSegmentationSelector.currentNode())
+        # Will disable button when undo stack is empty
+        self.undoButtonBP.enabled = self.logic.undoBPIteration(self.outputSegmentationSelector.currentNode())
+
+        # Enable redo button on undo
         self.redoButtonBP.enabled = True
-        self.undoButtonBP.enabled = False
+
 
     def onRedoButtonBP(self):
-        self.logic.redoBPIteration(self.outputSegmentationSelector.currentNode())
-        self.redoButtonBP.enabled = False
+        # Will disable button when redo stack is empty
+        self.redoButtonBP.enabled = self.logic.redoBPIteration(self.outputSegmentationSelector.currentNode())
+
+        # Enable undo button on redo
         self.undoButtonBP.enabled = True
 
     def onUndoButtonLeaflet(self):
-        self.logic.undoLeafletIteration(self.outputSegmentationSelector.currentNode())
+        # Will disable button when undo stack is empty
+        self.undoButtonLeaflet.enabled = self.logic.undoLeafletIteration(self.outputSegmentationSelector.currentNode())
+
+        # Enable redo button on undo
         self.redoButtonLeaflet.enabled = True
-        self.undoButtonLeaflet.enabled = False
 
     def onRedoButtonLeaflet(self):
-        self.logic.redoLeafletIteration(self.outputSegmentationSelector.currentNode())
-        self.redoButtonLeaflet.enabled = False
+        # Will disable button when redo stack is empty
+        self.redoButtonLeaflet.enabled = self.logic.redoLeafletIteration(self.outputSegmentationSelector.currentNode())
+
+        # Enable undo button on redo
         self.undoButtonLeaflet.enabled = True
+
 
     def onGenerateSurfaceMarkups(self):
         success = self.logic.generateSurfaceMarkups(self.outputSegmentationSelector.currentNode(),
@@ -500,13 +510,13 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         ScriptedLoadableModuleLogic.__init__(self)
         self._speedImg = None
         self._speedImgRefNode = None
-        self._levelSet = None
+        self._leafletLevelSet = None
         self._bpLevelSet = None
 
-        self._nextBpLevelSet = None
-        self._prevBpLevelSet = None
-        self._prevLeafletLevelSet = None
-        self._nextLeafletLevelSet = None
+        self._undoBPLevelSetStack = []
+        self._redoBPLevelSetStack = []
+        self._undoLeafletLevelSetStack = []
+        self._redoLeafletLevelSetStack = []
 
         self.moldBasePlate = None
 
@@ -595,7 +605,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         out_mask = geodesicActiveContour.Execute(levelSet, speedImg)
 
-        self._bpLevelSet = out_mask
+        self.updateBPLevelSet(out_mask)
 
         threshold = sitk.BinaryThresholdImageFilter()
         threshold.SetInsideValue(1)
@@ -607,6 +617,8 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         self.pushITKImageToSegmentation(out_mask, outputSeg, 'BP Segmentation')
 
     def iterateFirstPass(self, nIter, outputSeg):
+        self.updateBPLevelSetFromSegmentation(outputSeg)
+
         geodesicActiveContour = sitk.GeodesicActiveContourLevelSetImageFilter()
         geodesicActiveContour.SetCurvatureScaling(1.2)
         geodesicActiveContour.SetAdvectionScaling(1.0)
@@ -616,8 +628,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         out_mask = geodesicActiveContour.Execute(self._bpLevelSet, self._speedImg)
 
-        self._prevBpLevelSet = self._bpLevelSet
-        self._bpLevelSet = out_mask
+        self.updateBPLevelSet(out_mask)
 
         threshold = sitk.BinaryThresholdImageFilter()
         threshold.SetInsideValue(1)
@@ -629,6 +640,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         self.pushITKImageToSegmentation(out_mask, outputSeg, 'BP Segmentation')
 
     def initLeafletSeg(self, outputSeg):
+        self.updateBPLevelSetFromSegmentation(outputSeg)
 
         # Get region bordering initial blood-pool segmentation
         threshold = sitk.BinaryThresholdImageFilter()
@@ -660,7 +672,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         geodesicActiveContour2.SetNumberOfIterations(300)
         out_mask = geodesicActiveContour2.Execute(levelSet, self._speedImg)
 
-        self._levelSet = out_mask
+        self.updateLeafletLevelSet(out_mask)
 
         threshold = sitk.BinaryThresholdImageFilter()
         threshold.SetInsideValue(1)
@@ -674,6 +686,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         return out_mask
 
     def iterateSecondPass(self, nIter, outputSeg):
+        self.updateLeafletLevelSetFromSegmentation(outputSeg)
 
         geodesicActiveContour2 = sitk.GeodesicActiveContourLevelSetImageFilter()
         geodesicActiveContour2.SetCurvatureScaling(0.9)
@@ -681,10 +694,9 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         geodesicActiveContour2.SetPropagationScaling(-0.4)
         geodesicActiveContour2.SetMaximumRMSError(0.0001)
         geodesicActiveContour2.SetNumberOfIterations(nIter)
-        out_mask = geodesicActiveContour2.Execute(self._levelSet, self._speedImg)
+        out_mask = geodesicActiveContour2.Execute(self._leafletLevelSet, self._speedImg)
 
-        self._prevLeafletLevelSet = self._levelSet
-        self._levelSet = out_mask
+        self.updateLeafletLevelSet(out_mask)
 
         threshold = sitk.BinaryThresholdImageFilter()
         threshold.SetInsideValue(1)
@@ -697,9 +709,22 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         return out_mask
 
+    def updateBPLevelSet(self, levelSet):
+        if self._bpLevelSet:
+            # Only update if there has been a change to preserve undo pool
+            if not self.levelSetsEqual(levelSet, self._bpLevelSet):
+                self._undoBPLevelSetStack.append(self._bpLevelSet)
+                self._bpLevelSet = levelSet
+        else:
+            self._bpLevelSet = levelSet
+
     def undoBPIteration(self, outputSeg):
-        self._nextBpLevelSet = self._bpLevelSet
-        self._bpLevelSet = self._prevBpLevelSet
+        if not self._undoBPLevelSetStack:
+            logging.debug("undoBPIteration failed: stack empty")
+            return False
+
+        self._redoBPLevelSetStack.append(self._bpLevelSet)
+        self._bpLevelSet = self._undoBPLevelSetStack.pop()
 
         threshold = sitk.BinaryThresholdImageFilter()
         threshold.SetInsideValue(1)
@@ -708,10 +733,20 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         threshold.SetUpperThreshold(0.0)
 
         self.pushITKImageToSegmentation(threshold.Execute(self._bpLevelSet), outputSeg, 'BP Segmentation')
+
+        # Return true if stack is not empty
+        if self._undoBPLevelSetStack:
+            return True
+        else:
+            return False
 
     def redoBPIteration(self, outputSeg):
-        self._prevBpLevelSet = self._bpLevelSet
-        self._bpLevelSet = self._nextBpLevelSet
+        if not self._redoBPLevelSetStack:
+            logging.debug("redoBPIteration failed: stack empty")
+            return False
+
+        self._undoBPLevelSetStack.append(self._bpLevelSet)
+        self._bpLevelSet = self._redoBPLevelSetStack.pop()
 
         threshold = sitk.BinaryThresholdImageFilter()
         threshold.SetInsideValue(1)
@@ -721,9 +756,28 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         self.pushITKImageToSegmentation(threshold.Execute(self._bpLevelSet), outputSeg, 'BP Segmentation')
 
+        # Return true if stack is not empty
+        if self._redoBPLevelSetStack:
+            return True
+        else:
+            return False
+
+    def updateLeafletLevelSet(self, levelSet):
+        if self._leafletLevelSet:
+            # Only update if there has been a change to preserve undo pool
+            if not self.levelSetsEqual(levelSet, self._leafletLevelSet):
+                self._undoLeafletLevelSetStack.append(self._leafletLevelSet)
+                self._leafletLevelSet = levelSet
+        else:
+            self._leafletLevelSet = levelSet
+
     def undoLeafletIteration(self, outputSeg):
-        self._nextLeafletLevelSet = self._levelSet
-        self._levelSet = self._prevLeafletLevelSet
+        if not self._undoLeafletLevelSetStack:
+            logging.debug("undoLeafletIteration failed: stack empty")
+            return False
+
+        self._redoLeafletLevelSetStack.append(self._leafletLevelSet)
+        self._leafletLevelSet = self._undoLeafletLevelSetStack.pop()
 
         threshold = sitk.BinaryThresholdImageFilter()
         threshold.SetInsideValue(1)
@@ -731,13 +785,22 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         threshold.SetOutsideValue(0)
         threshold.SetUpperThreshold(0.0)
 
-        self.pushITKImageToSegmentation(threshold.Execute(self._levelSet), outputSeg, 'Leaflet Segmentation')
+        self.pushITKImageToSegmentation(threshold.Execute(self._leafletLevelSet), outputSeg, 'Leaflet Segmentation')
 
-        return self._levelSet
+        # Return true if stack is not empty
+        if self._undoLeafletLevelSetStack:
+            return True
+        else:
+            return False
+
 
     def redoLeafletIteration(self, outputSeg):
-        self._prevLeafletLevelSet = self._levelSet
-        self._levelSet = self._nextLeafletLevelSet
+        if not self._redoLeafletLevelSetStack:
+            logging.debug("redoLeafletIteration failed: stack empty")
+            return False
+
+        self._undoLeafletLevelSetStack.append(self._leafletLevelSet)
+        self._leafletLevelSet = self._redoLeafletLevelSetStack.pop()
 
         threshold = sitk.BinaryThresholdImageFilter()
         threshold.SetInsideValue(1)
@@ -745,9 +808,52 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         threshold.SetOutsideValue(0)
         threshold.SetUpperThreshold(0.0)
 
-        self.pushITKImageToSegmentation(threshold.Execute(self._levelSet), outputSeg, 'Leaflet Segmentation')
+        self.pushITKImageToSegmentation(threshold.Execute(self._leafletLevelSet), outputSeg, 'Leaflet Segmentation')
 
-        return self._levelSet
+        # Return true if stack is not empty
+        if self._redoLeafletLevelSetStack:
+            return True
+        else:
+            return False
+
+    def updateBPLevelSetFromSegmentation(self, segNode, segmentId = 'BP Segmentation'):
+        # Get new binary mask from segmentation node
+        mask = self.pullITKImageFromSegmentation(segNode, segmentId, self._speedImgRefNode)
+
+        # Get level set from mask
+        signedDis = sitk.SignedDanielssonDistanceMapImageFilter()
+        levelSet = signedDis.Execute(mask)
+
+        self.updateBPLevelSet(levelSet)
+
+    def updateLeafletLevelSetFromSegmentation(self, segNode, segmentId = 'Leaflet Segmentation'):
+        # Get new binary mask from segmentation node
+        mask = self.pullITKImageFromSegmentation(segNode, segmentId, self._speedImgRefNode)
+
+        # Get level set from mask
+        signedDis = sitk.SignedDanielssonDistanceMapImageFilter()
+        levelSet = signedDis.Execute(mask)
+
+        self.updateLeafletLevelSet(levelSet)
+
+    def levelSetsEqual(self, lvlset1, lvlset2):
+
+        # Convert level sets to label maps
+        threshold = sitk.BinaryThresholdImageFilter()
+        threshold.SetInsideValue(1)
+        threshold.SetLowerThreshold(-1000.0)
+        threshold.SetOutsideValue(0)
+        threshold.SetUpperThreshold(0.0)
+        im = threshold.Execute(lvlset1)
+        im2 = threshold.Execute(lvlset2)
+
+        # Check if binary label maps match
+        stat = sitk.StatisticsImageFilter()
+        stat.Execute(sitk.NotEqual(im, im2))
+        max = stat.GetMaximum()
+
+        # Level sets are equal if max of pixelwise not is 0
+        return max == 0
 
     def pushITKImageToSegmentation(self, img, segmentationNode, segmentId='Leaflet Segmentation'):
         if segmentationNode.GetSegmentation().GetSegmentIndex(segmentId) == -1:
@@ -800,7 +906,12 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
             slicer.modules.segmentations.logic().ExportSegmentsToLabelmapNode(segmentationNode, segmentationIds,
                                                                               tempNode)
         # Get the itk image
-        return sitkUtils.PullVolumeFromSlicer(tempNode)
+        itkImg = sitkUtils.PullVolumeFromSlicer(tempNode)
+
+        # Remove the temporary node
+        slicer.mrmlScene.RemoveNode(tempNode)
+
+        return itkImg
 
 
     def rasToIJK(self, point, volume):
