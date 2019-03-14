@@ -523,17 +523,20 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
     def initBPSeg(self, inputVolume, heartValveNode, outputSeg):
         """
-        Run the actual algorithm
-        :param heartValveNode:
+        Initialize the blood pool segmentation
+        :param inputVolume: The reference image volume to performa segmentation on
+        :param heartValveNode: The SlicerHeart MRML node containing annulus definition
+        :param outputSeg: Segmentation node to save output to
+        :return None
         """
 
         if not inputVolume or not heartValveNode or not outputSeg:
-            logging.error("Missing parameter")
+            logging.debug("initBPSeg failed: Missing parameter")
             return
 
         valveModel = HeartValveLib.getValveModel(heartValveNode)
         if valveModel.getAnnulusContourMarkupNode().GetNumberOfFiducials() == 0:
-            logging.error("Annulus contour not defined")
+            logging.debug("initBPSeg failed: Annulus contour not defined")
             return
 
         if valveModel.getProbeToRasTransformNode():
@@ -617,6 +620,12 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         self.pushITKImageToSegmentation(out_mask, outputSeg, 'BP Segmentation')
 
     def iterateFirstPass(self, nIter, outputSeg):
+        """
+        Iterates the blood pool segmentation by nIter amount
+        :param nIter: Number of iterations to run the active contour algorithm for
+        :param outputSeg: Segmentation node to save output to
+        :return: None
+        """
         self.updateBPLevelSetFromSegmentation(outputSeg)
 
         geodesicActiveContour = sitk.GeodesicActiveContourLevelSetImageFilter()
@@ -640,6 +649,11 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         self.pushITKImageToSegmentation(out_mask, outputSeg, 'BP Segmentation')
 
     def initLeafletSeg(self, outputSeg):
+        """
+        Initializes the leaflet segmentation based on the boundary of the blood pool segmentation
+        :param outputSeg: Segmentation node to save output to
+        :return: None
+        """
         self.updateBPLevelSetFromSegmentation(outputSeg)
 
         # Get region bordering initial blood-pool segmentation
@@ -686,6 +700,12 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         return out_mask
 
     def iterateSecondPass(self, nIter, outputSeg):
+        """
+        Iterates the leaflet segmentation by nIter amount
+        :param nIter: Number of iterations to run the active contour algorithm for
+        :param outputSeg: Segmentation node to save the output to
+        :return: None
+        """
         self.updateLeafletLevelSetFromSegmentation(outputSeg)
 
         geodesicActiveContour2 = sitk.GeodesicActiveContourLevelSetImageFilter()
@@ -710,6 +730,11 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         return out_mask
 
     def updateBPLevelSet(self, levelSet):
+        """
+        Update the blood pool level set instance variable. Maintains the undo stack.
+        :param levelSet: New level set
+        :return: None
+        """
         if self._bpLevelSet:
             # Only update if there has been a change to preserve undo pool
             if not self.levelSetsEqual(levelSet, self._bpLevelSet):
@@ -719,6 +744,11 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
             self._bpLevelSet = levelSet
 
     def undoBPIteration(self, outputSeg):
+        """
+        Performs the undo operation on the blood pool level set
+        :param outputSeg: Segmentation node used to save output
+        :return: True if the stack has additional items, False if it is empty
+        """
         if not self._undoBPLevelSetStack:
             logging.debug("undoBPIteration failed: stack empty")
             return False
@@ -741,6 +771,11 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
             return False
 
     def redoBPIteration(self, outputSeg):
+        """
+        Performs the redo operation on the blood pool level set
+        :param outputSeg: Segmentation node used to save output
+        :return: True if the stack has additional items, False if it is empty
+        """
         if not self._redoBPLevelSetStack:
             logging.debug("redoBPIteration failed: stack empty")
             return False
@@ -763,6 +798,11 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
             return False
 
     def updateLeafletLevelSet(self, levelSet):
+        """
+        Update the leaflet level set instance variable. Maintains the undo stack.
+        :param levelSet: New level set
+        :return: None
+        """
         if self._leafletLevelSet:
             # Only update if there has been a change to preserve undo pool
             if not self.levelSetsEqual(levelSet, self._leafletLevelSet):
@@ -772,6 +812,11 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
             self._leafletLevelSet = levelSet
 
     def undoLeafletIteration(self, outputSeg):
+        """
+        Performs the undo operation on the leaflet level set
+        :param outputSeg: Segmentation node used to save output
+        :return: True if the stack has additional items, False if it is empty
+        """
         if not self._undoLeafletLevelSetStack:
             logging.debug("undoLeafletIteration failed: stack empty")
             return False
@@ -795,6 +840,12 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
 
     def redoLeafletIteration(self, outputSeg):
+        """
+        Performs the redo operation on the leaflet level set
+        :param outputSeg: Segmentation node used to save output
+        :return: True if the stack has additional items, False if it is empty
+        """
+
         if not self._redoLeafletLevelSetStack:
             logging.debug("redoLeafletIteration failed: stack empty")
             return False
@@ -817,6 +868,12 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
             return False
 
     def updateBPLevelSetFromSegmentation(self, segNode, segmentId = 'BP Segmentation'):
+        """
+        Retrieves the new level set from the Segmentation node and update the blood pool level set for subsequent operations.
+        :param segNode: Segmentation node used to store output
+        :param segmentId: The segment ID to access
+        :return: None
+        """
         # Get new binary mask from segmentation node
         mask = self.pullITKImageFromSegmentation(segNode, segmentId, self._speedImgRefNode)
 
@@ -827,6 +884,12 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         self.updateBPLevelSet(levelSet)
 
     def updateLeafletLevelSetFromSegmentation(self, segNode, segmentId = 'Leaflet Segmentation'):
+        """
+        Retrieves the new level set from the Segmentation node and update the leaflet level set for subsequent operations.
+        :param segNode: Segmentation node used to store output
+        :param segmentId: The segment ID to access
+        :return: None
+        """
         # Get new binary mask from segmentation node
         mask = self.pullITKImageFromSegmentation(segNode, segmentId, self._speedImgRefNode)
 
@@ -837,6 +900,12 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         self.updateLeafletLevelSet(levelSet)
 
     def levelSetsEqual(self, lvlset1, lvlset2):
+        """
+        Compares if 2 level sets cover the same area to determine equality.
+        :param lvlset1: First level set for comparison
+        :param lvlset2: Second level set for comparison
+        :return: True if equal, False otherwise
+        """
 
         # Convert level sets to label maps
         threshold = sitk.BinaryThresholdImageFilter()
@@ -856,6 +925,13 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         return max == 0
 
     def pushITKImageToSegmentation(self, img, segmentationNode, segmentId='Leaflet Segmentation'):
+        """
+        Pushes an itk image to a Segmentation MRML node
+        :param img: The itk image
+        :param segmentationNode: The output segmentation ndoe
+        :param segmentId: The segment ID to store in
+        :return: None
+        """
         if segmentationNode.GetSegmentation().GetSegmentIndex(segmentId) == -1:
             segmentationNode.GetSegmentation().AddEmptySegment(segmentId)
 
@@ -883,12 +959,18 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         slicer.mrmlScene.RemoveNode(tempNode)
 
     def pullITKImageFromSegmentation(self, segmentationNode, segmentId, refNode = None):
+        """
+        Retrieves an itk image from a Segmentation MRML node
+        :param segmentationNode: The output segmentation node
+        :param segmentId: The segment ID to access
+        :return: The itk image
+        """
         if not segmentationNode or not segmentId:
-            logging.error("Missing parameter")
+            logging.debug("pullITKImageFromSegmentation failed: Missing parameter")
             return
 
         if segmentationNode.GetSegmentation().GetSegmentIndex(segmentId) == -1:
-            logging.error('Segment not found: ' + segmentId)
+            logging.debug('pullITKImageFromSegmentation failed: Segment not found - ' + segmentId)
             return
 
         # Create temporary label map node to get itk image from slicer volume
@@ -915,6 +997,12 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
 
     def rasToIJK(self, point, volume):
+        """
+        Convert a RAS point to an IJK point for a reference volume. Uses the volume node's RAStoIJK matrix.
+        :param point: The RAS input point.
+        :param volume: The reference volume
+        :return: The output point as a list of 3 points
+        """
         matrix = vtk.vtkMatrix4x4()
         volume.GetRASToIJKMatrix(matrix)
 
@@ -924,18 +1012,25 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         return outPoint[0:3]
 
     def generateSurfaceMarkups(self, segNode, heartValveNode, markupsNode):
+        """
+        Generate evenly spaced markups on the surface of the model.
+        :param segNode: Segmentation node storing model
+        :param heartValveNode: SlicerHeart HeartValve MRML node contatining annulus definition
+        :param markupsNode: Ouput markups node
+        :return: True if success, False otherwise
+        """
         if not segNode or not heartValveNode or not markupsNode:
-            logging.error("Missing parameter")
+            logging.debug("generateSurfaceMarkups failed: Missing parameter")
             return False
 
         valveModel = HeartValveLib.getValveModel(heartValveNode)
         if valveModel.getAnnulusContourMarkupNode().GetNumberOfFiducials() == 0:
-            logging.error("Annulus contour not defined")
+            logging.debug("generateSurfaceMarkups failed: Annulus contour not defined")
             return False
 
         leafletModel = segNode.GetClosedSurfaceRepresentation('Leaflet Segmentation')
         if leafletModel is None:
-            logging.error("Missing segmentation")
+            logging.debug("generateSurfaceMarkups failed: Missing segmentation")
             return False
 
         obb = vtk.vtkOBBTree()
@@ -999,7 +1094,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         markupsNode.EndModify(mNodeModifyState)
         fixedMarkupsNode.EndModify(fNodeModifyState)
-        
+
         markupsNode.GetMarkupsDisplayNode().SetTextScale(0)
 
         fixedMarkupsNode.GetMarkupsDisplayNode().SetVisibility(0)
@@ -1008,6 +1103,13 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         return True
 
     def pushModelToSegmentation(self, segNode, model, name):
+        """
+        Method to push a vtkPolyData model to a segmentation node
+        :param segNode: The Segmentation node
+        :param model: vtkPolyData model
+        :param name: Segment name to push to
+        :return: None
+        """
         import vtkSegmentationCorePython as vtkSegmentationCore
 
         if segNode.GetSegmentation().GetSegmentIndex(name) != -1:
@@ -1023,9 +1125,18 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
 
     def generateSurfaceMold(self, segNode, heartValveNode, depth, volume):
+        """
+        Generate the complete surface mold from the segmentation. Clips the bottom of the mold to a specified depth.
+        Will output mold to Segmentation node.
+        :param segNode: The Segmentation node
+        :param heartValveNode: SlicerHeart HeartValve MRML node contatining annulus definition
+        :param depth: Clipping depth
+        :param volume: Reference volume
+        :return: None
+        """
         # Check that parameters exist
         if not segNode or not heartValveNode or not depth or not volume:
-            logging.error("Missing parameter")
+            logging.debug("generateSurfaceMold failed: Missing parameter")
             return None
 
         valveModel = HeartValveLib.getValveModel(heartValveNode)
@@ -1098,12 +1209,17 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         slicer.mrmlScene.RemoveNode(segmentEditorNode)
 
     def exportSurfaceMold(self, segNode):
+        """
+        Export the surface mold from the Segmentation node to Models.
+        :param segNode: Segmentation node containing mold
+        :return: None
+        """
 
         # Get segmentation closed surface representations
         segMold = segNode.GetClosedSurfaceRepresentation('Final_Mold')
         annulusMold = segNode.GetClosedSurfaceRepresentation('Projected_Annulus')
         if not segMold or not annulusMold:
-            logging.error("Missing mold segmentation")
+            logging.debug("exportSurfaceMold failed: Missing mold segmentation")
             return
 
         # Fill holes (remove boudnary edges) and clean
@@ -1167,12 +1283,20 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
 
     def extractInnerSurfaceModel(self, segNode, valveModel, segName = 'Leaflet Segmentation'):
+        """
+        Extracts the inner surface (proximal to image probe) from the segmentation. Uses surface normals of leaflet
+        segmentation along with the annulus normal and blood pool definitions to determine points on inside of segmentaion.
+        :param segNode: The segmentation node
+        :param valveModel: SlicerHeart HeartValve MRML node containing annulus definition
+        :param segName: Name of segment containing leaflet segmentation
+        :return: vtkPolyData model of inner surface
+        """
         if not segNode or not valveModel:
-            logging.error("Missing parameter")
+            logging.debug("extractInnerSurfaceModel failed: Missing parameter")
             return None
 
         if valveModel.getAnnulusContourMarkupNode().GetNumberOfFiducials() == 0:
-            logging.error("Annulus contour not defined")
+            logging.debug("extractInnerSurfaceModel failed: Annulus contour not defined")
             return None
 
         annulusPlane = valveModel.getAnnulusContourPlane()
@@ -1181,7 +1305,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         leafletModel = segNode.GetClosedSurfaceRepresentation(segName)
         bpModel = segNode.GetClosedSurfaceRepresentation('BP Segmentation')
         if leafletModel is None or bpModel is None:
-            logging.error("Missing segmentation")
+            logging.debug("extractInnerSurfaceModel failed: Missing segmentation")
             return None
 
         # Decimate leaflet and BP polydata for efficiency
@@ -1290,12 +1414,18 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
 
     def generateProjectedAnnulus(self, extractedLeaflet, valveModel):
+        """
+        Projects the annulus definition inwards onto the surface model for mold
+        :param extractedLeaflet: vtkPolyData surface model
+        :param valveModel: SlicerHeart HeartValve MRML node containing annulus definition
+        :return: vtkPolyData model of projected annulus as a tube
+        """
         if not extractedLeaflet or not valveModel:
-            logging.error("Missing parameter")
+            logging.debug("generateProjectedAnnulus failed: Missing parameter")
             return None
 
         if valveModel.getAnnulusContourMarkupNode().GetNumberOfFiducials() == 0:
-            logging.error("Annulus contour not defined")
+            logging.debug("generateProjectedAnnulus failed: Annulus contour not defined")
             return None
 
         # Project defined annulus onto inner surface
@@ -1358,6 +1488,13 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         return annulusFittedModel
 
     def buildMoldHalves(self, extractedSurface, midClippingPlane, baseClippingPlane):
+        """
+        Constructs the top half of mold by extruding inwards towards annulus center, and bottom half of mold by extruding downwards and clipping.
+        :param extractedSurface: Extarcted inner surface vtkPolyData model
+        :param midClippingPlane: vtkPlane definition of middle surface plane
+        :param baseClippingPlane: vtkPlane definition of bottom clipping plane
+        :return: vtkPolyData models (topHalf, bottomHalf)
+        """
 
         # Split top and bottom halves of surface
         clipMid = vtk.vtkClipPolyData()
@@ -1499,6 +1636,13 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         return topMold, bottomMold
 
     def addOrUpdateModel(self, model, name, tformId = None):
+        """
+        Add or update a Model node
+        :param model: vtkPolyData model
+        :param name: Name of model node
+        :param tformId: Transform ID to apply to model
+        :return: None
+        """
         node = slicer.util.getFirstNodeByName(name)
         if not node:
             node = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLModelNode', name)
