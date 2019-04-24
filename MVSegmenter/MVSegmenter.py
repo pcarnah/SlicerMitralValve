@@ -294,6 +294,28 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         self.generateMoldButton.enabled = False
         exportModelFormLayout.addRow(self.generateMoldButton)
 
+        # Annulus Projection Offset
+        self.annulusOffsetSlider = ctk.ctkSliderWidget()
+        self.annulusOffsetSlider.singleStep = 0.05
+        self.annulusOffsetSlider.pageStep = 1
+        self.annulusOffsetSlider.minimum = -5
+        self.annulusOffsetSlider.maximum = 1
+        self.annulusOffsetSlider.value = -1
+        self.annulusOffsetSlider.decimals = 2
+        self.annulusOffsetSlider.tracking = False
+        self.annulusOffsetSlider.setToolTip("Adjust the offset of the annulus projection")
+        exportModelFormLayout.addRow("Annulus Projection Offset", self.annulusOffsetSlider)
+
+        self.projectAnnulusButton = qt.QPushButton("Project Annulus")
+        self.projectAnnulusButton.toolTip = "Project annulus onto mold"
+        self.projectAnnulusButton.enabled = False
+        exportModelFormLayout.addRow(self.projectAnnulusButton)
+
+        self.subtractAnnulusButton = qt.QPushButton("Subtract Annulus")
+        self.subtractAnnulusButton.toolTip = "Subtract annulus from mold"
+        self.subtractAnnulusButton.enabled = False
+        exportModelFormLayout.addRow(self.subtractAnnulusButton)
+
         self.exportMoldButton = qt.QPushButton("Export Mold to Model")
         self.exportMoldButton.toolTip = "Export mold segmentation node to model."
         self.exportMoldButton.enabled = False
@@ -325,6 +347,8 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         self.generateSurfaceMarkups.connect('clicked(bool)', self.onGenerateSurfaceMarkups)
 
         self.generateMoldButton.connect('clicked(bool)', self.onGenerateModelButton)
+        self.projectAnnulusButton.connect('clicked(bool)', self.onProjectAnnulusButton)
+        self.subtractAnnulusButton.connect('clicked(bool)', self.onSubtractAnnulusButton)
         self.exportMoldButton.connect('clicked(bool)', self.onExportModelButton)
 
         # Add vertical spacer
@@ -340,8 +364,12 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         self.initBPButton.enabled = self.heartValveSelector.currentNode() and self.inputSelector.currentNode() and self.outputSegmentationSelector.currentNode()
         # self.generateSurfaceMarkups.enabled = self.heartValveSelector.currentNode() and self.outputSegmentationSelector.currentNode() and self.markupsSelector.currentNode()
         self.generateMoldButton.enabled = self.heartValveSelector.currentNode() and self.outputSegmentationSelector.currentNode() and self.inputSelector.currentNode()
-        self.exportMoldButton.enabled = self.heartValveSelector.currentNode() and self.outputSegmentationSelector.currentNode() \
-                                        and self.outputSegmentationSelector.currentNode().GetClosedSurfaceRepresentation('Final_Mold')
+
+        self.projectAnnulusButton.enabled = self.heartValveSelector.currentNode() and self.outputSegmentationSelector.currentNode() \
+                                        and self.outputSegmentationSelector.currentNode().GetSegmentation().GetSegment('Final_Mold')
+
+        self.exportMoldButton.enabled = self.projectAnnulusButton.enabled and self.outputSegmentationSelector.currentNode().GetSegmentation().GetSegment('Projected_Annulus')
+        self.subtractAnnulusButton.enabled = self.exportMoldButton.enabled
 
     def onInitBPButton(self):
         try:
@@ -479,12 +507,40 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         finally:
             qt.QApplication.restoreOverrideCursor()
 
+    def onProjectAnnulusButton(self):
+        try:
+            # This can be a long operation - indicate it to the user
+            qt.QApplication.setOverrideCursor(qt.Qt.WaitCursor)
+
+            self.logic.projectAnnulus(self.outputSegmentationSelector.currentNode(),
+                                           self.heartValveSelector.currentNode(),
+                                           float(self.annulusOffsetSlider.value))
+            self.onSelect()
+
+        finally:
+            qt.QApplication.restoreOverrideCursor()
+
+    def onSubtractAnnulusButton(self):
+        try:
+            # This can be a long operation - indicate it to the user
+            qt.QApplication.setOverrideCursor(qt.Qt.WaitCursor)
+
+            self.logic.subtractAnnulusSegmentation(self.outputSegmentationSelector.currentNode(),
+                                                   self.inputSelector.currentNode())
+            self.onSelect()
+
+        finally:
+            qt.QApplication.restoreOverrideCursor()
+
+
     def onExportModelButton(self):
         try:
             # This can be a long operation - indicate it to the user
             qt.QApplication.setOverrideCursor(qt.Qt.WaitCursor)
 
             self.logic.exportSurfaceMold(self.outputSegmentationSelector.currentNode())
+
+            self.onSelect()
 
         finally:
             qt.QApplication.restoreOverrideCursor()
@@ -1146,13 +1202,6 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         if not extractedSurface:
             return None
 
-        # Get the annulus projected onto the proximal surface
-        projectedAnnulus = self.generateProjectedAnnulus(extractedSurface, valveModel)
-        if not projectedAnnulus:
-            return None
-
-        self.pushModelToSegmentation(segNode, projectedAnnulus, 'Projected_Annulus')
-
         contourPlane = valveModel.getAnnulusContourPlane()
 
         # Create clipped leaflet mold across middle
@@ -1196,6 +1245,83 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         segmentEditorWidget.setSegmentationNode(segNode)
         segmentEditorWidget.setMasterVolumeNode(volume)
         segmentEditorWidget.setCurrentSegmentID('Final_Mold')
+
+        # Smoothing
+        segmentEditorWidget.setActiveEffectByName("Smoothing")
+        effect = segmentEditorWidget.activeEffect()
+        effect.setParameter("SmoothingMethod", "GAUSSIAN")
+        effect.setParameter("GaussianStandardDeviationMm", 0.8)
+        effect.self().onApply()
+
+        # Clean up
+        segmentEditorWidget = None
+        slicer.mrmlScene.RemoveNode(segmentEditorNode)
+
+    def projectAnnulus(self, segNode, heartValveNode, offset = 0):
+        """
+        Project the annulus onto the mold model using the optional offset
+        :param segNode: Segmentation node
+        :param heartValveNode: Heart valve node containing annulus
+        :param offset: Optional offset value for projection
+        :return: None
+        """
+        # Check that parameters exist
+        if not segNode or not heartValveNode:
+            logging.debug("projectAnnulus failed: Missing parameter")
+            return None
+
+        valveModel = HeartValveLib.getValveModel(heartValveNode)
+
+        # Get segmentation closed surface representations
+        segMold = segNode.GetClosedSurfaceRepresentation('Final_Mold')
+        if not segMold:
+            logging.debug("projectAnnulus: Missing mold segmentation")
+            return None
+
+
+        # Get the annulus projected onto the proximal surface
+        projectedAnnulus = self.generateProjectedAnnulus(segMold, valveModel, offset)
+        if not projectedAnnulus:
+            return None
+
+        self.pushModelToSegmentation(segNode, projectedAnnulus, 'Projected_Annulus')
+
+        # Remake closed surface representation after adding mold (makes it generated model from labelmap)
+        segNode.RemoveClosedSurfaceRepresentation()
+        segNode.CreateClosedSurfaceRepresentation()
+
+    def subtractAnnulusSegmentation(self, segNode, volume):
+        """
+        Performs binary subtraction in the segmentation node
+        :param segNode: Segmentation node
+        :param volume: Master volume
+        :return: None
+        """
+        # Check that parameters exist
+        if not segNode or not volume:
+            logging.debug("subtractAnnulusSegmentation failed: Missing parameter")
+            return None
+
+        if not segNode.GetSegmentation().GetSegment('Projected_Annulus') or not segNode.GetSegmentation().GetSegment('Final_Mold'):
+            logging.debug("subtractAnnulusSegmentation failed: Missing segment")
+
+        # Create segment editor to get access to effects
+        segmentEditorWidget = slicer.qMRMLSegmentEditorWidget()
+        segmentEditorWidget.setMRMLScene(slicer.mrmlScene)
+        segmentEditorNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentEditorNode")
+        segmentEditorNode.SetOverwriteMode(segmentEditorNode.OverwriteNone)
+        segmentEditorWidget.setMRMLSegmentEditorNode(segmentEditorNode)
+        segmentEditorWidget.setSegmentationNode(segNode)
+        segmentEditorWidget.setMasterVolumeNode(volume)
+        segmentEditorWidget.setCurrentSegmentID('Final_Mold')
+
+        # Subtraction
+        segmentEditorWidget.setActiveEffectByName("Logical operators")
+        effect = segmentEditorWidget.activeEffect()
+        effect.setParameter("Operation", "SUBTRACT")
+        effect.setParameter("Bypass masking", 1)
+        effect.setParameter("ModifierSegmentID", 'Projected_Annulus')
+        effect.self().onApply()
 
         # Smoothing
         segmentEditorWidget.setActiveEffectByName("Smoothing")
@@ -1261,25 +1387,15 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         normAuto.Update()
 
 
-        # Perform boolean operations to get the base mold with the annulus projection
-        boolFilter = vtk.vtkLoopBooleanPolyDataFilter()
-        boolFilter.SetInputConnection(0, normAuto.GetOutputPort())
-        boolFilter.SetInputData(1, annulusMold)
-
-        boolFilter.SetOperationToDifference()
-        boolFilter.Update()
-
+        # Export closed surface meshes to model nodes
         moldModel = vtk.vtkPolyData()
-        moldModel.DeepCopy(boolFilter.GetOutput())
+        moldModel.DeepCopy(normAuto.GetOutput())
 
-        self.addOrUpdateModel(moldModel, 'Final_Mold_Model', segNode.GetTransformNodeID())
-
-        boolFilter.SetOperationToIntersection()
-        boolFilter.Update()
+        self.addOrUpdateModel(moldModel, 'Final_Mold_Model', segNode.GetTransformNodeID(), segNode.GetSegmentation().GetSegment('Final_Mold').GetColor())
 
         annulusModel = vtk.vtkPolyData()
-        annulusModel.DeepCopy(boolFilter.GetOutput())
-        self.addOrUpdateModel(annulusModel, 'Projected_Annulus_Model', segNode.GetTransformNodeID())
+        annulusModel.DeepCopy(annulusMold)
+        self.addOrUpdateModel(annulusModel, 'Projected_Annulus_Model', segNode.GetTransformNodeID(), segNode.GetSegmentation().GetSegment('Projected_Annulus').GetColor())
 
 
     def extractInnerSurfaceModel(self, segNode, valveModel, segName = 'Leaflet Segmentation'):
@@ -1413,7 +1529,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         return innerModel
 
 
-    def generateProjectedAnnulus(self, extractedLeaflet, valveModel):
+    def generateProjectedAnnulus(self, extractedLeaflet, valveModel, offset = 0):
         """
         Projects the annulus definition inwards onto the surface model for mold
         :param extractedLeaflet: vtkPolyData surface model
@@ -1442,7 +1558,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         projPoints = vtk.vtkPoints()
 
         # Project annulus inwards towards center
-        center = contourPlane[0]
+        center = contourPlane[0] + offset * 5 * contourPlane[1]
         for i in range(annulusMarkups.GetNumberOfFiducials()):
             annulusMarkups.GetNthFiducialPosition(i, pos)
             r = obb.IntersectWithLine(pos + pos - center, center, points, None)
@@ -1635,12 +1751,13 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         return topMold, bottomMold
 
-    def addOrUpdateModel(self, model, name, tformId = None):
+    def addOrUpdateModel(self, model, name, tformId = None, color = None):
         """
         Add or update a Model node
         :param model: vtkPolyData model
         :param name: Name of model node
         :param tformId: Transform ID to apply to model
+        :param color: Optional color of model to set
         :return: None
         """
         node = slicer.util.getFirstNodeByName(name)
@@ -1652,6 +1769,9 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         if tformId:
             node.SetAndObserveTransformNodeID(tformId)
+
+        if color:
+            node.GetDisplayNode().SetColor(color)
 
 
 
