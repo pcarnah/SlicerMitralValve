@@ -1280,15 +1280,37 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
 
         # Get the annulus projected onto the proximal surface
-        projectedAnnulus = self.generateProjectedAnnulus(segMold, valveModel, offset)
+        projectedAnnulus, stiffener = self.generateProjectedAnnulus(segMold, valveModel, offset)
         if not projectedAnnulus:
             return None
 
         self.pushModelToSegmentation(segNode, projectedAnnulus, 'Projected_Annulus')
+        self.pushModelToSegmentation(segNode, stiffener, 'Stiffener_Surface')
 
         # Remake closed surface representation after adding mold (makes it generated model from labelmap)
         segNode.RemoveClosedSurfaceRepresentation()
         segNode.CreateClosedSurfaceRepresentation()
+
+        # Create segment editor to get access to effects
+        segmentEditorWidget = slicer.qMRMLSegmentEditorWidget()
+        segmentEditorWidget.setMRMLScene(slicer.mrmlScene)
+        segmentEditorNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentEditorNode")
+        segmentEditorNode.SetOverwriteMode(segmentEditorNode.OverwriteNone)
+        segmentEditorWidget.setMRMLSegmentEditorNode(segmentEditorNode)
+        segmentEditorWidget.setSegmentationNode(segNode)
+        segmentEditorWidget.setMasterVolumeNode(valveModel.getValveVolumeNode())
+        segmentEditorWidget.setCurrentSegmentID('Stiffener_Surface')
+
+        # Smoothing
+        segmentEditorWidget.setActiveEffectByName("Smoothing")
+        effect = segmentEditorWidget.activeEffect()
+        effect.setParameter("SmoothingMethod", "GAUSSIAN")
+        effect.setParameter("GaussianStandardDeviationMm", 1.0)
+        effect.self().onApply()
+
+        # Clean up
+        segmentEditorWidget = None
+        slicer.mrmlScene.RemoveNode(segmentEditorNode)
 
     def subtractAnnulusSegmentation(self, segNode, volume):
         """
@@ -1344,7 +1366,8 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         # Get segmentation closed surface representations
         segMold = segNode.GetClosedSurfaceRepresentation('Final_Mold')
         annulusMold = segNode.GetClosedSurfaceRepresentation('Projected_Annulus')
-        if not segMold or not annulusMold:
+        stiffener = segNode.GetClosedSurfaceRepresentation('Stiffener_Surface')
+        if not segMold or not annulusMold or not stiffener:
             logging.debug("exportSurfaceMold failed: Missing mold segmentation")
             return
 
@@ -1396,6 +1419,14 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         annulusModel = vtk.vtkPolyData()
         annulusModel.DeepCopy(annulusMold)
         self.addOrUpdateModel(annulusModel, 'Projected_Annulus_Model', segNode.GetTransformNodeID(), segNode.GetSegmentation().GetSegment('Projected_Annulus').GetColor())
+
+        decimate.SetInputData(stiffener)
+        decimate.Update()
+
+        stiffenerModel = vtk.vtkPolyData()
+        stiffenerModel.DeepCopy(decimate.GetOutput())
+        self.addOrUpdateModel(stiffenerModel, 'Stiffener_Model', segNode.GetTransformNodeID(),
+                              segNode.GetSegmentation().GetSegment('Stiffener_Surface').GetColor())
 
 
     def extractInnerSurfaceModel(self, segNode, valveModel, segName = 'Leaflet Segmentation'):
@@ -1555,15 +1586,22 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         contourPlane = valveModel.getAnnulusContourPlane()
         pos = np.zeros(3)
         points = vtk.vtkPoints()
+        normals = vtk.vtkFloatArray()
+        normals.SetNumberOfComponents(3)
         projPoints = vtk.vtkPoints()
 
         # Project annulus inwards towards center
         center = contourPlane[0] + offset * 5 * contourPlane[1]
         for i in range(annulusMarkups.GetNumberOfFiducials()):
             annulusMarkups.GetNthFiducialPosition(i, pos)
+            stiffenerPos = pos + contourPlane[1] * offset * 3
             r = obb.IntersectWithLine(pos + pos - center, center, points, None)
             if r != 0:
                 projPoints.InsertNextPoint(points.GetPoint(0))
+                normals.InsertNextTuple3(*((stiffenerPos - center) / np.linalg.norm(stiffenerPos - center)))
+
+        projPoints.InsertNextPoint(projPoints.GetPoint(0))
+        normals.InsertNextTuple3(*normals.GetTuple3(0))
 
         lines = vtk.vtkCellArray()
         lines.InsertNextCell(projPoints.GetNumberOfPoints())
@@ -1574,6 +1612,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         projContour = vtk.vtkPolyData()
         projContour.SetPoints(projPoints)
         projContour.SetLines(lines)
+        projContour.GetPointData().SetNormals(normals)
 
         splineFilter = vtk.vtkSplineFilter()
         splineFilter.SetNumberOfSubdivisions(500)
@@ -1585,6 +1624,14 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         strip = vtk.vtkStripper()
         strip.SetInputConnection(splineFilter.GetOutputPort())
         strip.Update()
+
+        # Generate stiffener surface from mold outwards
+        ext = vtk.vtkLinearExtrusionFilter()
+        ext.SetExtrusionTypeToNormalExtrusion()
+        ext.SetInputConnection(strip.GetOutputPort())
+        ext.SetScaleFactor(20)
+        ext.CappingOn()
+        ext.Update()
 
         # Create tube from spline fitted projected annulus
         tubeFilter = vtk.vtkTubeFilter()
@@ -1598,10 +1645,39 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         cleanTube.SetInputConnection(tubeFilter.GetOutputPort())
         cleanTube.Update()
 
+        norm = vtk.vtkPolyDataNormals()
+        norm.ConsistencyOn()
+        norm.FlipNormalsOn()
+        norm.SplittingOn()
+        norm.SetInputConnection(ext.GetOutputPort())
+        norm.Update()
+
+        ext2 = vtk.vtkLinearExtrusionFilter()
+        ext2.SetExtrusionTypeToNormalExtrusion()
+        ext2.SetInputConnection(norm.GetOutputPort())
+        ext2.SetScaleFactor(1)
+        ext2.CappingOn()
+        ext2.Update()
+
+        norm = vtk.vtkPolyDataNormals()
+        norm.ConsistencyOn()
+        norm.SplittingOn()
+        norm.AutoOrientNormalsOn()
+        norm.SetInputConnection(ext2.GetOutputPort())
+        norm.Update()
+
+        cleanStiffener = vtk.vtkCleanPolyData()
+        cleanStiffener.SetInputConnection(norm.GetOutputPort())
+        cleanStiffener.Update()
+
         # Push fitted annulus onto segmentation node
         annulusFittedModel = vtk.vtkPolyData()
         annulusFittedModel.DeepCopy(cleanTube.GetOutput())
-        return annulusFittedModel
+
+        stiffener = vtk.vtkPolyData()
+        stiffener.DeepCopy(cleanStiffener.GetOutput())
+
+        return annulusFittedModel, stiffener
 
     def buildMoldHalves(self, extractedSurface, midClippingPlane, baseClippingPlane):
         """
