@@ -1457,7 +1457,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
             logging.debug("extractInnerSurfaceModel failed: Missing segmentation")
             return None
 
-        # Decimate leaflet and BP polydata for efficiency
+        # Decimate leaflet polydata for efficiency
         decimate = vtk.vtkDecimatePro()
         decimate.SetTargetReduction(0.6)
         decimate.PreserveTopologyOn()
@@ -1479,27 +1479,27 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
             dis = np.linalg.norm(np.subtract(annulusPlane[0], p))
             minDis = min(minDis, dis)
 
-        # Create tube along annulus plane normal
-        lineSource2 = vtk.vtkLineSource()
-        lineSource2.SetPoint1(annulusPlane[0] + annulusPlane[1] * 20)
-        lineSource2.SetPoint2(annulusPlane[0] - annulusPlane[1] * 20)
-        lineSource2.Update()
+        # Create tube along annulus plane normal to use for bottom half extraction
+        lineSource = vtk.vtkLineSource()
+        lineSource.SetPoint1(annulusPlane[0] + annulusPlane[1] * 20)
+        lineSource.SetPoint2(annulusPlane[0] - annulusPlane[1] * 20)
+        lineSource.Update()
 
-        tubeFilter2 = vtk.vtkTubeFilter()
-        tubeFilter2.SetRadius(0.5 * minDis)
-        tubeFilter2.CappingOff()
-        tubeFilter2.SetNumberOfSides(50)
-        tubeFilter2.SetInputConnection(lineSource2.GetOutputPort())
-        tubeFilter2.Update()
+        tubeFilter = vtk.vtkTubeFilter()
+        tubeFilter.SetRadius(0.5 * minDis)
+        tubeFilter.CappingOff()
+        tubeFilter.SetNumberOfSides(50)
+        tubeFilter.SetInputConnection(lineSource.GetOutputPort())
+        tubeFilter.Update()
 
         # OBBTree for determining self intersection of rays
         obb = vtk.vtkOBBTree()
         obb.SetDataSet(leafletModel)
         obb.BuildLocator()
 
-        locator2 = vtk.vtkPointLocator()
-        locator2.SetDataSet(tubeFilter2.GetOutput())
-        locator2.BuildLocator()
+        locator = vtk.vtkPointLocator()
+        locator.SetDataSet(tubeFilter.GetOutput())
+        locator.BuildLocator()
 
 
         # Loop over remaining points and build scalar array using different techniques for top and bottom half
@@ -1507,7 +1507,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         p = annulusPlane[0] + annulusPlane[1] * 2
         points = vtk.vtkPoints()
         normals = clipped.GetPointData().GetNormals()
-        tubeNormals = tubeFilter2.GetOutput().GetPointData().GetNormals()
+        tubeNormals = tubeFilter.GetOutput().GetPointData().GetNormals()
         scalars = vtk.vtkFloatArray()
         scalars.SetNumberOfValues(clipped.GetNumberOfPoints())
         for i in range(clipped.GetNumberOfPoints()):
@@ -1516,6 +1516,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
                 # Point is above annulus plane, set scalar based on self intersection (scalar value will determine clipping)
                 r = obb.IntersectWithLine(a0, annulusPlane[0] + annulusPlane[1] * 5, points, None)
 
+                # If not match try with point below annulus plane
                 if points.GetNumberOfPoints() != 1:
                     r = obb.IntersectWithLine(a0, annulusPlane[0] - annulusPlane[1] * 5, points, None)
 
@@ -1527,7 +1528,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
             else:
                 # Point is below annulus plane
                 # Get the closest point on tube surface, find angle between 2 normals in radians
-                closestPoint = locator2.FindClosestPoint(a0)
+                closestPoint = locator.FindClosestPoint(a0)
                 v = np.array(tubeNormals.GetTuple(closestPoint))
                 n = np.array(normals.GetTuple(i))
                 angle = math.acos(np.dot(n, v) / np.linalg.norm(n) / np.linalg.norm(v))
