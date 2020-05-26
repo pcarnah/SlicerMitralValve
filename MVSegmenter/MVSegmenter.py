@@ -1420,6 +1420,9 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         annulusModel.DeepCopy(annulusMold)
         self.addOrUpdateModel(annulusModel, 'Projected_Annulus_Model', segNode.GetTransformNodeID(), segNode.GetSegmentation().GetSegment('Projected_Annulus').GetColor())
 
+        # Decimate to 98%
+        decimate = vtk.vtkDecimatePro()
+        decimate.SetTargetReduction(0.98)
         decimate.SetInputData(stiffener)
         decimate.Update()
 
@@ -1629,7 +1632,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         ext = vtk.vtkLinearExtrusionFilter()
         ext.SetExtrusionTypeToNormalExtrusion()
         ext.SetInputConnection(strip.GetOutputPort())
-        ext.SetScaleFactor(20)
+        ext.SetScaleFactor(80)
         ext.CappingOn()
         ext.Update()
 
