@@ -991,8 +991,8 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         if segmentationNode.GetSegmentation().GetSegmentIndex(segmentId) == -1:
             segmentationNode.GetSegmentation().AddEmptySegment(segmentId)
 
-        if segmentationNode.GetSegmentation().GetConversionParameter('Decimation factor') != '0.0':
-            segmentationNode.GetSegmentation().SetConversionParameter('Decimation factor', '0.0')
+        if segmentationNode.GetSegmentation().GetConversionParameter('Decimation factor') != '0.5':
+            segmentationNode.GetSegmentation().SetConversionParameter('Decimation factor', '0.5')
             segmentationNode.RemoveClosedSurfaceRepresentation()
             segmentationNode.CreateClosedSurfaceRepresentation()
 
@@ -1420,7 +1420,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         annulusModel.DeepCopy(annulusMold)
         self.addOrUpdateModel(annulusModel, 'Projected_Annulus_Model', segNode.GetTransformNodeID(), segNode.GetSegmentation().GetSegment('Projected_Annulus').GetColor())
 
-        # Decimate to 98%
+        # Decimate stiffener ring to 98%
         decimate = vtk.vtkDecimatePro()
         decimate.SetTargetReduction(0.98)
         decimate.SetInputData(stiffener)
@@ -1452,15 +1452,14 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         annulusPlane = valveModel.getAnnulusContourPlane()
 
 
-        leafletModel = segNode.GetClosedSurfaceRepresentation(segName)
-        bpModel = segNode.GetClosedSurfaceRepresentation('BP Segmentation')
-        if leafletModel is None or bpModel is None:
+        leafletModel = segNode.GetClosedSurfaceRepresentation(segNode.GetSegmentation().GetSegmentIdBySegmentName(segName))
+        if leafletModel is None:
             logging.debug("extractInnerSurfaceModel failed: Missing segmentation")
             return None
 
-        # Decimate leaflet and BP polydata for efficiency
+        # Decimate leaflet polydata for efficiency
         decimate = vtk.vtkDecimatePro()
-        decimate.SetTargetReduction(0.5)
+        decimate.SetTargetReduction(0.6)
         decimate.PreserveTopologyOn()
         decimate.BoundaryVertexDeletionOff()
 
@@ -1469,26 +1468,29 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         leafletModel = vtk.vtkPolyData()
         leafletModel.DeepCopy(decimate.GetOutput())
 
-        decimate.SetInputData(bpModel)
-        decimate.Update()
-        bpModel = vtk.vtkPolyData()
-        bpModel.DeepCopy(decimate.GetOutput())
-
-        # Extract surface within a distance of 4 from bp segmentation
-        # Done for performance reasons as it quickly eliminates polydata that we do not need and makes the loop phase faster
-        imp = vtk.vtkImplicitPolyDataDistance()
-        imp.SetInput(bpModel)
-
-        clip = vtk.vtkClipPolyData()
-        clip.SetClipFunction(imp)
-        clip.GenerateClipScalarsOn()
-        clip.InsideOutOn()
-        clip.SetValue(4.0)
-        clip.SetInputData(leafletModel)
-        clip.Update()
-
         clipped = vtk.vtkPolyData()
-        clipped.DeepCopy(clip.GetOutput())
+        clipped.DeepCopy(leafletModel)
+
+        # Get Annulus minimum radius
+        annulusPoints = valveModel.getAnnulusContourModelNode().GetPolyData().GetPoints()
+        minDis = float('inf')
+        for i in range(annulusPoints.GetNumberOfPoints()):
+            p = annulusPoints.GetPoint(i)
+            dis = np.linalg.norm(np.subtract(annulusPlane[0], p))
+            minDis = min(minDis, dis)
+
+        # Create tube along annulus plane normal to use for bottom half extraction
+        lineSource = vtk.vtkLineSource()
+        lineSource.SetPoint1(annulusPlane[0] + annulusPlane[1] * 20)
+        lineSource.SetPoint2(annulusPlane[0] - annulusPlane[1] * 20)
+        lineSource.Update()
+
+        tubeFilter = vtk.vtkTubeFilter()
+        tubeFilter.SetRadius(0.5 * minDis)
+        tubeFilter.CappingOff()
+        tubeFilter.SetNumberOfSides(50)
+        tubeFilter.SetInputConnection(lineSource.GetOutputPort())
+        tubeFilter.Update()
 
         # OBBTree for determining self intersection of rays
         obb = vtk.vtkOBBTree()
@@ -1496,23 +1498,28 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         obb.BuildLocator()
 
         locator = vtk.vtkPointLocator()
-        locator.SetDataSet(bpModel)
+        locator.SetDataSet(tubeFilter.GetOutput())
         locator.BuildLocator()
+
 
         # Loop over remaining points and build scalar array using different techniques for top and bottom half
         a0 = np.zeros(3)
         p = annulusPlane[0] + annulusPlane[1] * 2
         points = vtk.vtkPoints()
         normals = clipped.GetPointData().GetNormals()
-        bpNormals = bpModel.GetPointData().GetNormals()
+        tubeNormals = tubeFilter.GetOutput().GetPointData().GetNormals()
         scalars = vtk.vtkFloatArray()
         scalars.SetNumberOfValues(clipped.GetNumberOfPoints())
         for i in range(clipped.GetNumberOfPoints()):
             clipped.GetPoint(i, a0)
             if np.dot(annulusPlane[1], a0 - p) > 0:
                 # Point is above annulus plane, set scalar based on self intersection (scalar value will determine clipping)
+                r = obb.IntersectWithLine(a0, annulusPlane[0] + annulusPlane[1] * 5, points, None)
 
-                r = obb.IntersectWithLine(a0, annulusPlane[0], points, None)
+                # If not match try with point below annulus plane
+                if points.GetNumberOfPoints() != 1:
+                    r = obb.IntersectWithLine(a0, annulusPlane[0] - annulusPlane[1] * 5, points, None)
+
                 # If only 1 intersection point, line does not cross through leaflet model as the line always intersects at a0
                 if points.GetNumberOfPoints() == 1:
                     scalars.SetValue(i, 10)     # Set scalar to large value so point will be kept
@@ -1520,9 +1527,9 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
                     scalars.SetValue(i, -10)    # Set scalar to small value so point will be discarded
             else:
                 # Point is below annulus plane
-                # Get the closest point on bp surface, find angle between 2 normals in radians
+                # Get the closest point on tube surface, find angle between 2 normals in radians
                 closestPoint = locator.FindClosestPoint(a0)
-                v = np.array(bpNormals.GetTuple(closestPoint))
+                v = np.array(tubeNormals.GetTuple(closestPoint))
                 n = np.array(normals.GetTuple(i))
                 angle = math.acos(np.dot(n, v) / np.linalg.norm(n) / np.linalg.norm(v))
                 scalars.SetValue(i, angle)      # Set scalar to angle
@@ -1533,7 +1540,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         # Clip based on scalar values (keep scalars bigger than value)
         clip2 = vtk.vtkClipPolyData()
         clip2.GenerateClipScalarsOff()
-        clip2.SetValue(1.74533)  # 100 degrees threshold in radians
+        clip2.SetValue(1.5)  # 86 degrees threshold in radians
         clip2.SetInputData(clipped)
 
         conn = vtk.vtkConnectivityFilter()
@@ -1597,7 +1604,8 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         center = contourPlane[0] + offset * 5 * contourPlane[1]
         for i in range(annulusMarkups.GetNumberOfFiducials()):
             annulusMarkups.GetNthFiducialPosition(i, pos)
-            stiffenerPos = pos + contourPlane[1] * offset * 3
+            # Get point above annulus to project towards
+            stiffenerPos = pos + contourPlane[1] * 12
             r = obb.IntersectWithLine(pos + pos - center, center, points, None)
             if r != 0:
                 projPoints.InsertNextPoint(points.GetPoint(0))
@@ -1628,14 +1636,6 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         strip.SetInputConnection(splineFilter.GetOutputPort())
         strip.Update()
 
-        # Generate stiffener surface from mold outwards
-        ext = vtk.vtkLinearExtrusionFilter()
-        ext.SetExtrusionTypeToNormalExtrusion()
-        ext.SetInputConnection(strip.GetOutputPort())
-        ext.SetScaleFactor(80)
-        ext.CappingOn()
-        ext.Update()
-
         # Create tube from spline fitted projected annulus
         tubeFilter = vtk.vtkTubeFilter()
         tubeFilter.SetRadius(1) # Radius of 1 determined through trial and error on printed models
@@ -1648,6 +1648,15 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         cleanTube.SetInputConnection(tubeFilter.GetOutputPort())
         cleanTube.Update()
 
+        # Generate stiffener surface from mold outwards
+        ext = vtk.vtkLinearExtrusionFilter()
+        ext.SetExtrusionTypeToNormalExtrusion()
+        ext.SetInputConnection(strip.GetOutputPort())
+        ext.SetScaleFactor(100)
+        ext.CappingOn()
+        ext.Update()
+
+        # Clean up stiffener surface
         norm = vtk.vtkPolyDataNormals()
         norm.ConsistencyOn()
         norm.FlipNormalsOn()
