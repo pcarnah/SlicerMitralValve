@@ -1452,7 +1452,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         annulusPlane = valveModel.getAnnulusContourPlane()
 
 
-        leafletModel = segNode.GetClosedSurfaceInternalRepresentation(segName)
+        leafletModel = segNode.GetClosedSurfaceInternalRepresentation(segNode.GetSegmentation().GetSegmentIdBySegmentName(segName))
         if leafletModel is None:
             logging.debug("extractInnerSurfaceModel failed: Missing segmentation")
             return None
@@ -1604,7 +1604,8 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         center = contourPlane[0] + offset * 5 * contourPlane[1]
         for i in range(annulusMarkups.GetNumberOfFiducials()):
             annulusMarkups.GetNthFiducialPosition(i, pos)
-            stiffenerPos = pos + contourPlane[1] * offset * 3
+            # Get point above annulus to project towards
+            stiffenerPos = pos + contourPlane[1] * 12
             r = obb.IntersectWithLine(pos + pos - center, center, points, None)
             if r != 0:
                 projPoints.InsertNextPoint(points.GetPoint(0))
@@ -1635,14 +1636,6 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         strip.SetInputConnection(splineFilter.GetOutputPort())
         strip.Update()
 
-        # Generate stiffener surface from mold outwards
-        ext = vtk.vtkLinearExtrusionFilter()
-        ext.SetExtrusionTypeToNormalExtrusion()
-        ext.SetInputConnection(strip.GetOutputPort())
-        ext.SetScaleFactor(100)
-        ext.CappingOn()
-        ext.Update()
-
         # Create tube from spline fitted projected annulus
         tubeFilter = vtk.vtkTubeFilter()
         tubeFilter.SetRadius(1) # Radius of 1 determined through trial and error on printed models
@@ -1654,6 +1647,14 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         cleanTube = vtk.vtkCleanPolyData()
         cleanTube.SetInputConnection(tubeFilter.GetOutputPort())
         cleanTube.Update()
+
+        # Generate stiffener surface from mold outwards
+        ext = vtk.vtkLinearExtrusionFilter()
+        ext.SetExtrusionTypeToNormalExtrusion()
+        ext.SetInputConnection(strip.GetOutputPort())
+        ext.SetScaleFactor(100)
+        ext.CappingOn()
+        ext.Update()
 
         # Clean up stiffener surface
         norm = vtk.vtkPolyDataNormals()
