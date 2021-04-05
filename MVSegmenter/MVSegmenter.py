@@ -1865,7 +1865,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
             from monai.engines import SupervisedEvaluator
             import shutil
         except ImportError as error:
-            slicer.util.pip_install('torch==1.7.0+cpu')
+            slicer.util.pip_install('torch==1.8.1+cpu torchvision==0.9.1+cpu -f https://download.pytorch.org/whl/torch_stable.html')
             slicer.util.pip_install('monai[nibabel,skimage,pillow,gdown,ignite,torchvision,tqdm,lmdb,psutil,tensorboard]==0.3')
             importlib.invalidate_caches()
             import monai
@@ -1884,7 +1884,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
             import shutil
 
         if monai.__version__ != '0.3.0':
-            slicer.util.pip_install('torch==1.7.0+cpu')
+            slicer.util.pip_install('torch==1.8.1+cpu torchvision==0.9.1+cpu -f https://download.pytorch.org/whl/torch_stable.html')
             slicer.util.pip_install('monai[nibabel,skimage,pillow,gdown,ignite,torchvision,tqdm,lmdb,psutil,tensorboard]==0.3')
             logging.error("Requires MONAI version 0.3. Please restart Slicer.")
             return
