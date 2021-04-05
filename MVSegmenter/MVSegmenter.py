@@ -1,5 +1,8 @@
 import os
+import sys
 import unittest
+import importlib
+from pathlib import Path
 import vtk, qt, ctk, slicer
 import SimpleITK as sitk
 import sitkUtils
@@ -115,24 +118,29 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         self.outputSegmentationSelector.setToolTip("Pick the output to the algorithm.")
         parametersFormLayout.addRow("Output Segmentation", self.outputSegmentationSelector)
 
-        #
-        # check box to trigger taking screen shots for later use in tutorials
-        #
-        self.enableScreenshotsFlagCheckBox = qt.QCheckBox()
-        self.enableScreenshotsFlagCheckBox.checked = 0
-        self.enableScreenshotsFlagCheckBox.setToolTip(
-            "If checked, take screen shots for tutorials. Use Save Data to write them to disk.")
-        parametersFormLayout.addRow("Enable Screenshots", self.enableScreenshotsFlagCheckBox)
+        # Add vertical spacer
+        self.layout.addSpacing(vSpace)
+
+        self.runDeepMVButton = qt.QPushButton("Run DeepMV")
+        self.runDeepMVButton.toolTip = "Run DeepMV Segmentation"
+        self.runDeepMVButton.enabled = False
+        self.layout.addWidget(self.runDeepMVButton)
 
         # Add vertical spacer
         self.layout.addSpacing(vSpace)
+
+        # Semi-Automatic Segmentation
+        semiAutoCollapsibleButton = ctk.ctkCollapsibleButton()
+        semiAutoCollapsibleButton.text = "Semi-Automatic Segmentation"
+        self.layout.addWidget(semiAutoCollapsibleButton)
+        semiAutoFormLayout = qt.QFormLayout(semiAutoCollapsibleButton)
 
         #
         #  First Phase Segmentation
         #
         firstPassCollapsibleButton = ctk.ctkCollapsibleButton()
         firstPassCollapsibleButton.text = "Blood Pool Segmentation"
-        self.layout.addWidget(firstPassCollapsibleButton)
+        semiAutoFormLayout.addWidget(firstPassCollapsibleButton)
 
         # Layout within the dummy collapsible button
         firstPassFormLayout = qt.QFormLayout(firstPassCollapsibleButton)
@@ -186,7 +194,7 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         #
         secondPassCollapsibleButton = ctk.ctkCollapsibleButton()
         secondPassCollapsibleButton.text = "Leaflet Segmentation"
-        self.layout.addWidget(secondPassCollapsibleButton)
+        semiAutoFormLayout.addRow(secondPassCollapsibleButton)
 
         # Layout within the dummy collapsible button
         secondPassFormLayout = qt.QFormLayout(secondPassCollapsibleButton)
@@ -230,39 +238,6 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         incrementHBox.addWidget(self.redoButtonLeaflet)
 
         secondPassFormLayout.addRow("Increment Segmentation", incrementHBox)
-
-        # Add vertical spacer
-        self.layout.addSpacing(vSpace)
-
-        #
-        #  Manual Adjustment
-        #
-        manualAdjCollapsibleButton = ctk.ctkCollapsibleButton()
-        manualAdjCollapsibleButton.text = "Manual Adjustment"
-        manualAdjCollapsibleButton.collapsed = True
-        # self.layout.addWidget(manualAdjCollapsibleButton)
-
-        manualAdjFormLayout = qt.QFormLayout(manualAdjCollapsibleButton)
-
-        # Markups node selector
-        self.markupsSelector = slicer.qMRMLNodeComboBox()
-        self.markupsSelector.nodeTypes = ["vtkMRMLMarkupsFiducialNode"]
-        self.markupsSelector.selectNodeUponCreation = True
-        self.markupsSelector.addEnabled = True
-        self.markupsSelector.removeEnabled = False
-        self.markupsSelector.renameEnabled = True
-        self.markupsSelector.noneEnabled = False
-        self.markupsSelector.showHidden = False
-        self.markupsSelector.showChildNodeTypes = False
-        self.markupsSelector.setMRMLScene(slicer.mrmlScene)
-        self.markupsSelector.setToolTip("Pick the markups node used for adjusting model.")
-        manualAdjFormLayout.addRow("Markups Node", self.markupsSelector)
-
-        # Activate button
-        self.generateSurfaceMarkups = qt.QPushButton("Generate Surface Points")
-        self.generateSurfaceMarkups.toolTip = "Generates points on the surface of the model that will allow the model to be deformed"
-        self.generateSurfaceMarkups.enabled = False
-        manualAdjFormLayout.addRow(self.generateSurfaceMarkups)
 
         # Add vertical spacer
         self.layout.addSpacing(vSpace)
@@ -325,6 +300,7 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         self.layout.addSpacing(vSpace)
 
         # connections
+        self.runDeepMVButton.connect('clicked(bool)', self.onRunDeepMV)
         self.initBPButton.connect('clicked(bool)', self.onInitBPButton)
         self.incrementFirstButton50.connect('clicked(bool)', self.onIncrementFirst50Button)
         self.incrementFirstButton100.connect('clicked(bool)', self.onIncrementFirst100Button)
@@ -343,8 +319,8 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         self.inputSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onSelect)
         self.outputSegmentationSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onSelect)
 
-        self.markupsSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onSelect)
-        self.generateSurfaceMarkups.connect('clicked(bool)', self.onGenerateSurfaceMarkups)
+        # self.markupsSelector.connect("currentNodeChanged(vtkMRMLNode*)", self.onSelect)
+        # self.generateSurfaceMarkups.connect('clicked(bool)', self.onGenerateSurfaceMarkups)
 
         self.generateMoldButton.connect('clicked(bool)', self.onGenerateModelButton)
         self.projectAnnulusButton.connect('clicked(bool)', self.onProjectAnnulusButton)
@@ -361,6 +337,7 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         pass
 
     def onSelect(self):
+        self.runDeepMVButton.enabled = self.heartValveSelector.currentNode() and self.inputSelector.currentNode() and self.outputSegmentationSelector.currentNode()
         self.initBPButton.enabled = self.heartValveSelector.currentNode() and self.inputSelector.currentNode() and self.outputSegmentationSelector.currentNode()
         # self.generateSurfaceMarkups.enabled = self.heartValveSelector.currentNode() and self.outputSegmentationSelector.currentNode() and self.markupsSelector.currentNode()
         self.generateMoldButton.enabled = self.heartValveSelector.currentNode() and self.outputSegmentationSelector.currentNode() and self.inputSelector.currentNode()
@@ -371,12 +348,20 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         self.exportMoldButton.enabled = self.projectAnnulusButton.enabled and self.outputSegmentationSelector.currentNode().GetSegmentation().GetSegment('Projected_Annulus')
         self.subtractAnnulusButton.enabled = self.exportMoldButton.enabled
 
+    def onRunDeepMV(self):
+        try:
+            # This can be a long operation - indicate it to the user
+            qt.QApplication.setOverrideCursor(qt.Qt.WaitCursor)
+
+            self.logic.runDeepMV(self.inputSelector.currentNode(), self.outputSegmentationSelector.currentNode())
+        finally:
+            qt.QApplication.restoreOverrideCursor()
+
     def onInitBPButton(self):
         try:
             # This can be a long operation - indicate it to the user
             qt.QApplication.setOverrideCursor(qt.Qt.WaitCursor)
 
-            enableScreenshotsFlag = self.enableScreenshotsFlagCheckBox.checked
             self.logic.initBPSeg(self.inputSelector.currentNode(), self.heartValveSelector.currentNode(),
                                  self.outputSegmentationSelector.currentNode())
             self.incrementFirstButton50.enabled = True
@@ -1861,6 +1846,129 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         if color:
             node.GetDisplayNode().SetColor(color)
 
+
+    def runDeepMV(self, volumeNode, outputSeg):
+        try:
+            import monai
+            import torch
+            from monai.data import Dataset, DataLoader
+            from monai.transforms import (Compose, LoadNiftid, Orientationd, ScaleIntensityd,
+                                          AddChanneld, ToTensord, CropForegroundd, Spacingd, RandSpatialCropSamplesd,
+                                          RandAffined, RandCropByPosNegLabeld, AsDiscreted, Rand3DElasticd,
+                                          LabelToContour)
+            from monai.handlers import (CheckpointLoader, SegmentationSaver)
+            from monai.networks.layers import Norm
+            from monai.networks import predict_segmentation
+            from monai.networks.nets import UNet
+            from monai.inferers import SlidingWindowInferer
+            from monai.engines import SupervisedEvaluator
+            import shutil
+        except ImportError as error:
+            slicer.util.pip_install('torch==1.7.0+cpu')
+            slicer.util.pip_install('monai[nibabel,skimage,pillow,gdown,ignite,torchvision,tqdm,lmdb,psutil,tensorboard]==0.3')
+            importlib.invalidate_caches()
+            import monai
+            import torch
+            from monai.data import Dataset, DataLoader
+            from monai.transforms import (Compose, LoadNiftid, Orientationd, ScaleIntensityd,
+                                          AddChanneld, ToTensord, CropForegroundd, Spacingd, RandSpatialCropSamplesd,
+                                          RandAffined, RandCropByPosNegLabeld, AsDiscreted, Rand3DElasticd,
+                                          LabelToContour)
+            from monai.handlers import (CheckpointLoader, SegmentationSaver)
+            from monai.networks.layers import Norm
+            from monai.networks import predict_segmentation
+            from monai.networks.nets import UNet
+            from monai.inferers import SlidingWindowInferer
+            from monai.engines import SupervisedEvaluator
+            import shutil
+
+        if monai.__version__ != '0.3.0':
+            slicer.util.pip_install('torch==1.7.0+cpu')
+            slicer.util.pip_install('monai[nibabel,skimage,pillow,gdown,ignite,torchvision,tqdm,lmdb,psutil,tensorboard]==0.3')
+            logging.error("Requires MONAI version 0.3. Please restart Slicer.")
+            return
+
+
+        # Get tempfile path
+        path = Path(slicer.app.temporaryPath).joinpath('deepmv')
+        path.mkdir(parents=True, exist_ok=True)
+
+
+        inputFilePath = path.joinpath('{}.nii'.format(volumeNode.GetName()))
+        img = sitkUtils.PullVolumeFromSlicer(volumeNode)
+        sitk.WriteImage(img, str(inputFilePath), True)
+
+        monai.config.print_config()
+        print(str(path))
+
+        # Need to first write image here as nifti
+
+        # Load and segment images
+        images = [str(p.absolute()) for p in path.glob("*.nii")]
+        d = [{"image": im} for im in images]
+        keys = ("image")
+
+        # Define transforms for image and segmentation
+        xform = Compose([
+            LoadNiftid(keys),
+            AddChanneld(keys),
+            Spacingd(keys, 0.3, diagonal=True, mode='bilinear'),
+            Orientationd(keys, axcodes='RAS'),
+            ScaleIntensityd("image"),
+            CropForegroundd(keys, source_key="image"),
+            ToTensord(keys)
+        ])
+
+        # ds = CacheDataset(d, xform)
+        ds = Dataset(d, xform)
+        loader = DataLoader(ds, batch_size=1, shuffle=False, num_workers=0)
+
+        monai.utils.first(loader)
+
+        device = torch.device('cpu')
+        # net = UNet(dimensions=3, in_channels=1, out_channels=1, channels=(16, 32, 64, 128, 256),
+        #            strides=(2, 2, 2, 2), num_res_units=2, norm=Norm.BATCH).to(device)
+
+        modelPath = Path(__file__).parent.joinpath('Resources/model.md')
+        net = torch.load(str(modelPath))
+
+        evaluator = SupervisedEvaluator(
+            device=device,
+            val_data_loader=loader,
+            network=net,
+            inferer=SlidingWindowInferer((96, 96, 96), sw_batch_size=6),
+        )
+
+        # modelPath = Path(__file__).parent.joinpath('Resources/model.pt')
+        # checkpoint = torch.load(str(modelPath), map_location=device)
+        # net.load_state_dict(checkpoint['net'])
+        #
+        # modelPath2 = modelPath.parent.joinpath('model.md')
+        # torch.save(net, str(modelPath2))
+        #
+        #
+        # checkpoint_loader = CheckpointLoader(str(modelPath), {'net': net}, map_location=device)
+        # checkpoint_loader.attach(evaluator)
+
+        prediction_saver = SegmentationSaver(
+            output_dir=path,
+            name="evaluator",
+            dtype=np.dtype('float64'),
+            batch_transform=lambda batch: batch["image_meta_dict"],
+            output_transform=lambda output: predict_segmentation(output['pred'])
+        )
+        prediction_saver.attach(evaluator)
+
+        # Running segmentation
+        evaluator.run()
+
+        # Retrieve segmentations afterwards and include them into segmentation node
+        segPath = path.joinpath(volumeNode.GetName()).joinpath('{}_seg.nii.gz'.format(volumeNode.GetName()))
+        seg = sitk.ReadImage(str(segPath))
+        self.pushITKImageToSegmentation(seg, outputSeg, 'Leaflet Segmentation')
+
+        # Cleanup temporary files
+        shutil.rmtree(str(path))
 
 
 
