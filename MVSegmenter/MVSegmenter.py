@@ -978,13 +978,10 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         if segmentationNode.GetSegmentation().GetConversionParameter('Decimation factor') != '0.5':
             segmentationNode.GetSegmentation().SetConversionParameter('Decimation factor', '0.5')
-            segmentationNode.RemoveClosedSurfaceRepresentation()
-            segmentationNode.CreateClosedSurfaceRepresentation()
 
         if segmentationNode.GetSegmentation().GetConversionParameter('Smoothing factor') != '0.5':
             segmentationNode.GetSegmentation().SetConversionParameter('Smoothing factor', '0.5')
-            segmentationNode.RemoveClosedSurfaceRepresentation()
-            segmentationNode.CreateClosedSurfaceRepresentation()
+
 
         # Create temporary label map node
         tempNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLabelMapVolumeNode', 'temp_labelmap')
@@ -996,6 +993,9 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         slicer.modules.segmentations.logic().ImportLabelmapToSegmentationNode(tempNode, segmentationNode,
                                                                               segmentationIds)
+
+        segmentationNode.RemoveClosedSurfaceRepresentation()
+        segmentationNode.CreateClosedSurfaceRepresentation()
 
         slicer.mrmlScene.RemoveNode(tempNode)
 
@@ -1181,6 +1181,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
             return None
 
         valveModel = HeartValveLib.getValveModel(heartValveNode)
+        segNode.CreateClosedSurfaceRepresentation()
 
         # Get the proximal surface of the valve
         extractedSurface = self.extractInnerSurfaceModel(segNode, valveModel)
@@ -1436,7 +1437,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         annulusPlane = valveModel.getAnnulusContourPlane()
 
-
+        segNode.CreateClosedSurfaceRepresentation()
         leafletModel = segNode.GetClosedSurfaceInternalRepresentation(segNode.GetSegmentation().GetSegmentIdBySegmentName(segName))
         if leafletModel is None:
             logging.debug("extractInnerSurfaceModel failed: Missing segmentation")
