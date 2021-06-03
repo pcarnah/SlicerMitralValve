@@ -11,6 +11,7 @@ import HeartValveLib
 import numpy as np
 import math
 import logging
+import platform
 
 
 #
@@ -52,6 +53,18 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         ScriptedLoadableModuleWidget.__init__(self, parent)
 
         self.logic = MVSegmenterLogic()
+        self.papillaryMarkupsNode = slicer.util.getFirstNodeByClassByName('vtkMRMLMarkupsFiducialNode', 'Papillary Tips Markup')
+
+        if not self.papillaryMarkupsNode:
+            self.papillaryMarkupsNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLMarkupsFiducialNode', 'Papillary Tips Markup')
+
+        if not self.papillaryMarkupsNode.GetDisplayNode():
+            self.papillaryMarkupsNode.CreateDefaultDisplayNodes()
+
+        self.papillaryMarkupNodeObserver = \
+            self.papillaryMarkupsNode.AddObserver(slicer.vtkMRMLMarkupsNode.PointModifiedEvent,
+                                               self.onPapillaryMarkupNodeModified)
+
 
     def setup(self):
         ScriptedLoadableModuleWidget.setup(self)
@@ -132,6 +145,7 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         # Semi-Automatic Segmentation
         semiAutoCollapsibleButton = ctk.ctkCollapsibleButton()
         semiAutoCollapsibleButton.text = "Semi-Automatic Segmentation"
+        semiAutoCollapsibleButton.collapsed = True
         self.layout.addWidget(semiAutoCollapsibleButton)
         semiAutoFormLayout = qt.QFormLayout(semiAutoCollapsibleButton)
 
@@ -247,7 +261,7 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         #
         generateSurfaceMoldCollapsibleButton = ctk.ctkCollapsibleButton()
         generateSurfaceMoldCollapsibleButton.text = "Generate Mold"
-        generateSurfaceMoldCollapsibleButton.collapsed = True
+        generateSurfaceMoldCollapsibleButton.collapsed = False
         self.layout.addWidget(generateSurfaceMoldCollapsibleButton)
 
         exportModelFormLayout = qt.QFormLayout(generateSurfaceMoldCollapsibleButton)
@@ -291,6 +305,23 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         self.subtractAnnulusButton.enabled = False
         exportModelFormLayout.addRow(self.subtractAnnulusButton)
 
+        papillaryHBox = qt.QHBoxLayout()
+        # papillaryHBox.addStretch(20)
+
+        self.addPapillary1Button = qt.QPushButton("Place Papillary Tips")
+        self.addPapillary1Button.toolTip = "Place the papillary muscle tips"
+        papillaryHBox.addWidget(self.addPapillary1Button)
+
+        self.deleteLastPapillaryButton = qt.QPushButton("Delete Last Tip Markup")
+        self.deleteLastPapillaryButton.toolTip = "Delete the last papillary muscle tip"
+        papillaryHBox.addWidget(self.deleteLastPapillaryButton)
+
+        self.deleteAllPapillarryButton = qt.QPushButton("Delete All Tip Markups")
+        self.deleteAllPapillarryButton.toolTip = "Delete all papillary muscle tips"
+        papillaryHBox.addWidget(self.deleteAllPapillarryButton)
+
+        exportModelFormLayout.addRow("Papillary Placement", papillaryHBox)
+
         self.exportMoldButton = qt.QPushButton("Export Mold to Model")
         self.exportMoldButton.toolTip = "Export mold segmentation node to model."
         self.exportMoldButton.enabled = False
@@ -325,6 +356,9 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         self.generateMoldButton.connect('clicked(bool)', self.onGenerateModelButton)
         self.projectAnnulusButton.connect('clicked(bool)', self.onProjectAnnulusButton)
         self.subtractAnnulusButton.connect('clicked(bool)', self.onSubtractAnnulusButton)
+        self.addPapillary1Button.connect('clicked(bool)', self.onAddPapillaryButton)
+        self.deleteLastPapillaryButton.connect('clicked(bool)', self.onDeleteLastPapillaryButton)
+        self.deleteAllPapillarryButton.connect('clicked(bool)', self.onDeleteAllPapillaryButton)
         self.exportMoldButton.connect('clicked(bool)', self.onExportModelButton)
 
         # Add vertical spacer
@@ -334,26 +368,36 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         self.onSelect()
 
     def cleanup(self):
-        pass
+        self.papillaryMarkupsNode.RemoveObserver(self.papillaryMarkupNodeObserver)
 
     def onSelect(self):
         self.runDeepMVButton.enabled = self.heartValveSelector.currentNode() and self.inputSelector.currentNode() and self.outputSegmentationSelector.currentNode()
         self.initBPButton.enabled = self.heartValveSelector.currentNode() and self.inputSelector.currentNode() and self.outputSegmentationSelector.currentNode()
         # self.generateSurfaceMarkups.enabled = self.heartValveSelector.currentNode() and self.outputSegmentationSelector.currentNode() and self.markupsSelector.currentNode()
-        self.generateMoldButton.enabled = self.heartValveSelector.currentNode() and self.outputSegmentationSelector.currentNode() and self.inputSelector.currentNode()
+        self.generateMoldButton.enabled = self.heartValveSelector.currentNode() \
+                                          and self.outputSegmentationSelector.currentNode() \
+                                          and self.inputSelector.currentNode() \
+                                          and self.outputSegmentationSelector.currentNode().GetSegmentation().GetSegment('Leaflet Segmentation')
 
         self.projectAnnulusButton.enabled = self.heartValveSelector.currentNode() and self.outputSegmentationSelector.currentNode() \
                                         and self.outputSegmentationSelector.currentNode().GetSegmentation().GetSegment('Final_Mold')
 
-        self.exportMoldButton.enabled = self.projectAnnulusButton.enabled and self.outputSegmentationSelector.currentNode().GetSegmentation().GetSegment('Projected_Annulus')
-        self.subtractAnnulusButton.enabled = self.exportMoldButton.enabled
+        self.exportMoldButton.enabled = self.projectAnnulusButton.enabled and self.outputSegmentationSelector.currentNode().GetSegmentation().GetSegment('Projected_Annulus') \
+                                        and self.papillaryMarkupsNode.GetNumberOfDefinedControlPoints() >= 2
+        self.subtractAnnulusButton.enabled = self.projectAnnulusButton.enabled and self.outputSegmentationSelector.currentNode().GetSegmentation().GetSegment('Projected_Annulus')
+
+        numberOfPoints = self.papillaryMarkupsNode.GetNumberOfDefinedControlPoints()
+        self.addPapillary1Button.enabled = self.generateMoldButton.enabled and numberOfPoints < 2
+        self.deleteLastPapillaryButton.enabled = numberOfPoints > 0
+        self.deleteAllPapillarryButton.enabled = numberOfPoints > 0
 
     def onRunDeepMV(self):
         try:
             # This can be a long operation - indicate it to the user
             qt.QApplication.setOverrideCursor(qt.Qt.WaitCursor)
 
-            self.logic.runDeepMV(self.inputSelector.currentNode(), self.outputSegmentationSelector.currentNode())
+            self.logic.runDeepMV(self.heartValveSelector.currentNode(), self.inputSelector.currentNode(), self.outputSegmentationSelector.currentNode())
+            self.onSelect()
         finally:
             qt.QApplication.restoreOverrideCursor()
 
@@ -368,6 +412,7 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
             self.incrementFirstButton100.enabled = True
             self.incrementFirstButton500.enabled = True
             self.initLeafletButton.enabled = True
+            self.onSelect()
         finally:
             qt.QApplication.restoreOverrideCursor()
 
@@ -413,6 +458,7 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
             self.incrementButton10.enabled = True
             self.incrementButton50.enabled = True
             self.incrementButton200.enabled = True
+            self.onSelect()
 
         finally:
             qt.QApplication.restoreOverrideCursor()
@@ -518,12 +564,42 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
             qt.QApplication.restoreOverrideCursor()
 
 
+    def onAddPapillaryButton(self):
+        self.papillaryMarkupsNode.SetAndObserveTransformNodeID(self.outputSegmentationSelector.currentNode().GetTransformNodeID())
+        self.papillaryMarkupsNode.GetDisplayNode().SetTextScale(0)
+        slicer.modules.markups.logic().SetActiveListID(self.papillaryMarkupsNode)
+        slicer.app.applicationLogic().GetInteractionNode().SetPlaceModePersistence(1)
+        slicer.app.applicationLogic().GetInteractionNode().SetCurrentInteractionMode(1)
+
+
+    def onDeleteLastPapillaryButton(self):
+        numberOfPoints = self.papillaryMarkupsNode.GetNumberOfDefinedControlPoints()
+        if numberOfPoints > 0:
+            self.papillaryMarkupsNode.RemoveMarkup(numberOfPoints - 1)
+        self.onSelect()
+
+    def onDeleteAllPapillaryButton(self):
+        self.papillaryMarkupsNode.RemoveAllMarkups()
+        self.onSelect()
+
+    def onPapillaryMarkupNodeModified(self, unusedArg1=None, unusedArg2=None, unusedArg3=None):
+        numberOfPoints = self.papillaryMarkupsNode.GetNumberOfDefinedControlPoints()
+
+        # self.addPapillary1Button.enabled = self.generateMoldButton.enabled and numberOfPoints < 2
+        # self.deleteLastPapillaryButton.enabled = numberOfPoints > 0
+        # self.deleteAllPapillarryButton.enabled = numberOfPoints > 0
+
+        if numberOfPoints >= 2:
+            slicer.app.applicationLogic().GetInteractionNode().SetCurrentInteractionMode(2)
+
+        self.onSelect()
+
     def onExportModelButton(self):
         try:
             # This can be a long operation - indicate it to the user
             qt.QApplication.setOverrideCursor(qt.Qt.WaitCursor)
 
-            self.logic.exportSurfaceMold(self.outputSegmentationSelector.currentNode())
+            self.logic.exportSurfaceMold(self.outputSegmentationSelector.currentNode(), self.papillaryMarkupsNode)
 
             self.onSelect()
 
@@ -582,6 +658,9 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         if valveModel.getProbeToRasTransformNode():
             outputSeg.SetAndObserveTransformNodeID(valveModel.getProbeToRasTransformNode().GetID())
+
+        if not outputSeg.GetNodeReference(outputSeg.GetReferenceImageGeometryReferenceRole()):
+            outputSeg.SetReferenceImageGeometryParameterFromVolumeNode(inputVolume)
 
         self._speedImgRefNode = inputVolume
         # calculate speed image from input volume
@@ -1342,7 +1421,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         segmentEditorWidget = None
         slicer.mrmlScene.RemoveNode(segmentEditorNode)
 
-    def exportSurfaceMold(self, segNode):
+    def exportSurfaceMold(self, segNode, papillaryMarkupsNode):
         """
         Export the surface mold from the Segmentation node to Models.
         :param segNode: Segmentation node containing mold
@@ -1356,6 +1435,11 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         if not segMold or not annulusMold or not stiffener:
             logging.debug("exportSurfaceMold failed: Missing mold segmentation")
             return
+
+        # Set default polydata extension to stl
+        defaultModelStorageNode = slicer.vtkMRMLModelStorageNode()
+        defaultModelStorageNode.SetDefaultWriteFileExtension('stl')
+        slicer.mrmlScene.AddDefaultNode(defaultModelStorageNode)
 
         # Fill holes (remove boudnary edges) and clean
         holeFill = vtk.vtkFillHolesFilter()
@@ -1416,6 +1500,24 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         stiffenerModel.DeepCopy(decimate.GetOutput())
         self.addOrUpdateModel(stiffenerModel, 'Stiffener_Model', segNode.GetTransformNodeID(),
                               segNode.GetSegmentation().GetSegment('Stiffener_Surface').GetColor())
+
+        papillaryModel = vtk.vtkPolyData()
+        papAppend = vtk.vtkAppendPolyData()
+
+        for i in range(papillaryMarkupsNode.GetNumberOfDefinedControlPoints()):
+            p = np.array([0,0,0])
+            papillaryMarkupsNode.GetNthControlPointPosition(i, p)
+
+            sphereSource = vtk.vtkSphereSource()
+            sphereSource.SetCenter(p)
+            sphereSource.SetRadius(2)
+            sphereSource.Update()
+
+            papAppend.AddInputConnection(sphereSource.GetOutputPort())
+        papAppend.Update()
+        papillaryModel.DeepCopy(papAppend.GetOutput())
+
+        self.addOrUpdateModel(papillaryModel, 'Papillary_Model', segNode.GetTransformNodeID())
 
 
     def extractInnerSurfaceModel(self, segNode, valveModel, segName = 'Leaflet Segmentation'):
@@ -1653,7 +1755,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         ext2 = vtk.vtkLinearExtrusionFilter()
         ext2.SetExtrusionTypeToNormalExtrusion()
         ext2.SetInputConnection(norm.GetOutputPort())
-        ext2.SetScaleFactor(1)
+        ext2.SetScaleFactor(1.75)
         ext2.CappingOn()
         ext2.Update()
 
@@ -1848,7 +1950,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
             node.GetDisplayNode().SetColor(color)
 
 
-    def runDeepMV(self, volumeNode, outputSeg):
+    def runDeepMV(self, heartValveNode,  volumeNode, outputSeg):
         try:
             import monai
             import torch
@@ -1865,7 +1967,10 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
             from monai.engines import SupervisedEvaluator
             import shutil
         except ImportError as error:
-            slicer.util.pip_install('torch==1.8.1+cpu torchvision==0.9.1+cpu -f https://download.pytorch.org/whl/torch_stable.html')
+            if platform.system() == 'Darwin':
+                slicer.util.pip_install('torch==1.8.1 torchvision==0.9.1')
+            else:
+                slicer.util.pip_install('torch==1.8.1+cpu torchvision==0.9.1+cpu -f https://download.pytorch.org/whl/torch_stable.html')
             slicer.util.pip_install('monai[nibabel,skimage,pillow,gdown,ignite,torchvision,tqdm,lmdb,psutil,tensorboard]==0.3')
             importlib.invalidate_caches()
             import monai
@@ -1884,11 +1989,22 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
             import shutil
 
         if monai.__version__ != '0.3.0':
-            slicer.util.pip_install('torch==1.8.1+cpu torchvision==0.9.1+cpu -f https://download.pytorch.org/whl/torch_stable.html')
+            if platform.system() == 'Darwin':
+                slicer.util.pip_install('torch==1.8.1 torchvision==0.9.1')
+            else:
+                slicer.util.pip_install(
+                    'torch==1.8.1+cpu torchvision==0.9.1+cpu -f https://download.pytorch.org/whl/torch_stable.html')
             slicer.util.pip_install('monai[nibabel,skimage,pillow,gdown,ignite,torchvision,tqdm,lmdb,psutil,tensorboard]==0.3')
             logging.error("Requires MONAI version 0.3. Please restart Slicer.")
             return
 
+        valveModel = HeartValveLib.getValveModel(heartValveNode)
+
+        if valveModel.getProbeToRasTransformNode():
+            outputSeg.SetAndObserveTransformNodeID(valveModel.getProbeToRasTransformNode().GetID())
+
+        if not outputSeg.GetNodeReference(outputSeg.GetReferenceImageGeometryReferenceRole()):
+            outputSeg.SetReferenceImageGeometryParameterFromVolumeNode(volumeNode)
 
         # Get tempfile path
         path = Path(slicer.app.temporaryPath).joinpath('deepmv')
