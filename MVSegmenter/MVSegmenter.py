@@ -53,18 +53,8 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         ScriptedLoadableModuleWidget.__init__(self, parent)
 
         self.logic = MVSegmenterLogic()
-        self.papillaryMarkupsNode = slicer.util.getFirstNodeByClassByName('vtkMRMLMarkupsFiducialNode', 'Papillary Tips Markup')
-
-        if not self.papillaryMarkupsNode:
-            self.papillaryMarkupsNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLMarkupsFiducialNode', 'Papillary Tips Markup')
-
-        if not self.papillaryMarkupsNode.GetDisplayNode():
-            self.papillaryMarkupsNode.CreateDefaultDisplayNodes()
-
-        self.papillaryMarkupNodeObserver = \
-            self.papillaryMarkupsNode.AddObserver(slicer.vtkMRMLMarkupsNode.PointModifiedEvent,
-                                               self.onPapillaryMarkupNodeModified)
-
+        self.papillaryMarkupsNode = None
+        self.papillaryMarkupNodeObserver = None
 
     def setup(self):
         ScriptedLoadableModuleWidget.setup(self)
@@ -271,7 +261,7 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         self.baseDepthSlider.pageStep = 1
         self.baseDepthSlider.minimum = -20
         self.baseDepthSlider.maximum = 0
-        self.baseDepthSlider.value = -10
+        self.baseDepthSlider.value = -12.5
         self.baseDepthSlider.decimals = 1
         self.baseDepthSlider.tracking = False
         self.baseDepthSlider.setToolTip("Adjust the depth of the base surface for the mold")
@@ -369,8 +359,40 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
 
     def cleanup(self):
         self.papillaryMarkupsNode.RemoveObserver(self.papillaryMarkupNodeObserver)
+        self.papillaryMarkupsNode = None
+        self.papillaryMarkupNodeObserver = None
+
+    def setupPapillaryMarkups(self):
+        if self.papillaryMarkupsNode:
+            if self.papillaryMarkupsNode.GetScene():
+                return
+            else:
+                # Cleanup if node removed from scene or scene cleared
+                self.papillaryMarkupsNode.RemoveObserver(self.papillaryMarkupNodeObserver)
+                self.papillaryMarkupsNode = None
+                self.papillaryMarkupNodeObserver = None
+
+        self.papillaryMarkupsNode = slicer.util.getFirstNodeByClassByName('vtkMRMLMarkupsFiducialNode',
+                                                                          'Papillary Tips Markup')
+        if not self.papillaryMarkupsNode:
+            self.papillaryMarkupsNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLMarkupsFiducialNode',
+                                                                           'Papillary Tips Markup')
+
+        if not self.papillaryMarkupsNode.GetDisplayNode():
+            self.papillaryMarkupsNode.CreateDefaultDisplayNodes()
+
+        self.papillaryMarkupsNode.GetDisplayNode().SetTextScale(2.0)
+        self.papillaryMarkupsNode.GetDisplayNode().SetGlyphSize(3.0)
+        self.papillaryMarkupsNode.GetDisplayNode().SetUseGlyphScale(False)
+        self.papillaryMarkupsNode.GetDisplayNode().SetOpacity(0.6)
+
+        self.papillaryMarkupNodeObserver = \
+            self.papillaryMarkupsNode.AddObserver(slicer.vtkMRMLMarkupsNode.PointModifiedEvent,
+                                                  self.onPapillaryMarkupNodeModified)
 
     def onSelect(self):
+        self.setupPapillaryMarkups()
+
         self.runDeepMVButton.enabled = self.heartValveSelector.currentNode() and self.inputSelector.currentNode() and self.outputSegmentationSelector.currentNode()
         self.initBPButton.enabled = self.heartValveSelector.currentNode() and self.inputSelector.currentNode() and self.outputSegmentationSelector.currentNode()
         # self.generateSurfaceMarkups.enabled = self.heartValveSelector.currentNode() and self.outputSegmentationSelector.currentNode() and self.markupsSelector.currentNode()
@@ -382,11 +404,11 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         self.projectAnnulusButton.enabled = self.heartValveSelector.currentNode() and self.outputSegmentationSelector.currentNode() \
                                         and self.outputSegmentationSelector.currentNode().GetSegmentation().GetSegment('Final_Mold')
 
+        numberOfPoints = self.papillaryMarkupsNode.GetNumberOfDefinedControlPoints()
         self.exportMoldButton.enabled = self.projectAnnulusButton.enabled and self.outputSegmentationSelector.currentNode().GetSegmentation().GetSegment('Projected_Annulus') \
-                                        and self.papillaryMarkupsNode.GetNumberOfDefinedControlPoints() >= 2
+                                        and numberOfPoints >= 2
         self.subtractAnnulusButton.enabled = self.projectAnnulusButton.enabled and self.outputSegmentationSelector.currentNode().GetSegmentation().GetSegment('Projected_Annulus')
 
-        numberOfPoints = self.papillaryMarkupsNode.GetNumberOfDefinedControlPoints()
         self.addPapillary1Button.enabled = self.generateMoldButton.enabled and numberOfPoints < 2
         self.deleteLastPapillaryButton.enabled = numberOfPoints > 0
         self.deleteAllPapillarryButton.enabled = numberOfPoints > 0
@@ -566,7 +588,6 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
 
     def onAddPapillaryButton(self):
         self.papillaryMarkupsNode.SetAndObserveTransformNodeID(self.outputSegmentationSelector.currentNode().GetTransformNodeID())
-        self.papillaryMarkupsNode.GetDisplayNode().SetTextScale(0)
         slicer.modules.markups.logic().SetActiveListID(self.papillaryMarkupsNode)
         slicer.app.applicationLogic().GetInteractionNode().SetPlaceModePersistence(1)
         slicer.app.applicationLogic().GetInteractionNode().SetCurrentInteractionMode(1)
@@ -579,15 +600,12 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         self.onSelect()
 
     def onDeleteAllPapillaryButton(self):
-        self.papillaryMarkupsNode.RemoveAllMarkups()
+        while self.papillaryMarkupsNode.GetNumberOfDefinedControlPoints() > 0:
+            self.papillaryMarkupsNode.RemoveMarkup(self.papillaryMarkupsNode.GetNumberOfDefinedControlPoints() - 1)
         self.onSelect()
 
     def onPapillaryMarkupNodeModified(self, unusedArg1=None, unusedArg2=None, unusedArg3=None):
         numberOfPoints = self.papillaryMarkupsNode.GetNumberOfDefinedControlPoints()
-
-        # self.addPapillary1Button.enabled = self.generateMoldButton.enabled and numberOfPoints < 2
-        # self.deleteLastPapillaryButton.enabled = numberOfPoints > 0
-        # self.deleteAllPapillarryButton.enabled = numberOfPoints > 0
 
         if numberOfPoints >= 2:
             slicer.app.applicationLogic().GetInteractionNode().SetCurrentInteractionMode(2)
@@ -1061,6 +1079,9 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         if segmentationNode.GetSegmentation().GetConversionParameter('Smoothing factor') != '0.5':
             segmentationNode.GetSegmentation().SetConversionParameter('Smoothing factor', '0.5')
 
+        slicer.modules.SegmentEditorWidget.editor.mrmlSegmentEditorNode().SetOverwriteMode(
+            slicer.modules.SegmentEditorWidget.editor.mrmlSegmentEditorNode().OverwriteNone)
+
 
         # Create temporary label map node
         tempNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLabelMapVolumeNode', 'temp_labelmap')
@@ -1276,7 +1297,8 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         midClippingPlane = vtk.vtkPlane()
         midClippingPlane.SetNormal(contourPlane[1])
-        midClippingPlane.SetOrigin(contourPlane[0] + (contourPlane[1] * 2))
+        midClippingPlane.SetOrigin(contourPlane[0])
+        # midClippingPlane.SetOrigin(contourPlane[0] + (contourPlane[1] * 2))
 
         topMold, bottomMold = self.buildMoldHalves(extractedSurface, midClippingPlane, baseClippingPlane)
 
