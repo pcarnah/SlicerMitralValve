@@ -418,7 +418,7 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
             # This can be a long operation - indicate it to the user
             qt.QApplication.setOverrideCursor(qt.Qt.WaitCursor)
 
-            self.logic.runDeepMV(self.heartValveSelector.currentNode(), self.inputSelector.currentNode(), self.outputSegmentationSelector.currentNode())
+            self.logic.runDeepMitral(self.heartValveSelector.currentNode(), self.inputSelector.currentNode(), self.outputSegmentationSelector.currentNode())
             self.onSelect()
         finally:
             qt.QApplication.restoreOverrideCursor()
@@ -1078,9 +1078,6 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         if segmentationNode.GetSegmentation().GetConversionParameter('Smoothing factor') != '0.5':
             segmentationNode.GetSegmentation().SetConversionParameter('Smoothing factor', '0.5')
-
-        slicer.modules.SegmentEditorWidget.editor.mrmlSegmentEditorNode().SetOverwriteMode(
-            slicer.modules.SegmentEditorWidget.editor.mrmlSegmentEditorNode().OverwriteNone)
 
 
         # Create temporary label map node
@@ -1972,7 +1969,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
             node.GetDisplayNode().SetColor(color)
 
 
-    def runDeepMV(self, heartValveNode,  volumeNode, outputSeg):
+    def runDeepMitral(self, heartValveNode, volumeNode, outputSeg):
         try:
             import monai
             import torch
