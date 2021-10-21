@@ -1973,11 +1973,12 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         try:
             import monai
             import torch
-            from monai.data import Dataset, DataLoader
-            from monai.transforms import (Compose, LoadNiftid, Orientationd, ScaleIntensityd,
-                                          AddChanneld, ToTensord, CropForegroundd, Spacingd, RandSpatialCropSamplesd,
+            from monai.data import Dataset, DataLoader, list_data_collate, decollate_batch
+            from monai.inferers import sliding_window_inference
+            from monai.transforms import (Compose, LoadImaged, Orientationd, ScaleIntensityd,
+                                          EnsureChannelFirstd, EnsureTyped, CropForegroundd, Spacingd, RandSpatialCropSamplesd,
                                           RandAffined, RandCropByPosNegLabeld, AsDiscreted, Rand3DElasticd,
-                                          LabelToContour)
+                                          LabelToContour, Activations, AsDiscrete, KeepLargestConnectedComponent, SaveImage)
             from monai.handlers import (CheckpointLoader, SegmentationSaver)
             from monai.networks.layers import Norm
             from monai.networks import predict_segmentation
@@ -1987,18 +1988,19 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
             import shutil
         except ImportError as error:
             if platform.system() == 'Darwin':
-                slicer.util.pip_install('torch==1.8.1 torchvision==0.9.1')
+                slicer.util.pip_install('torch==1.8.2 torchvision==0.9.2')
             else:
-                slicer.util.pip_install('torch==1.8.1+cpu torchvision==0.9.1+cpu -f https://download.pytorch.org/whl/torch_stable.html')
-            slicer.util.pip_install('monai[nibabel,skimage,pillow,gdown,ignite,torchvision,tqdm,lmdb,psutil,tensorboard]==0.3')
+                slicer.util.pip_install('torch==1.8.2+cpu torchvision==0.9.2+cpu torchaudio===0.8.2 -f https://download.pytorch.org/whl/lts/1.8/torch_lts.html')
+            slicer.util.pip_install('monai[nibabel,skimage,pillow,gdown,ignite,torchvision,tqdm,lmdb,psutil,tensorboard,einops]==0.7')
             importlib.invalidate_caches()
             import monai
             import torch
-            from monai.data import Dataset, DataLoader
-            from monai.transforms import (Compose, LoadNiftid, Orientationd, ScaleIntensityd,
-                                          AddChanneld, ToTensord, CropForegroundd, Spacingd, RandSpatialCropSamplesd,
+            from monai.data import Dataset, DataLoader, list_data_collate, decollate_batch
+            from monai.inferers import sliding_window_inference
+            from monai.transforms import (Compose, LoadImaged, Orientationd, ScaleIntensityd,
+                                          EnsureChannelFirstd, EnsureTyped, CropForegroundd, Spacingd, RandSpatialCropSamplesd,
                                           RandAffined, RandCropByPosNegLabeld, AsDiscreted, Rand3DElasticd,
-                                          LabelToContour)
+                                          LabelToContour, Activations, AsDiscrete, KeepLargestConnectedComponent,SaveImage)
             from monai.handlers import (CheckpointLoader, SegmentationSaver)
             from monai.networks.layers import Norm
             from monai.networks import predict_segmentation
@@ -2007,14 +2009,14 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
             from monai.engines import SupervisedEvaluator
             import shutil
 
-        if monai.__version__ != '0.3.0':
+        if monai.__version__ != '0.7.0':
             if platform.system() == 'Darwin':
-                slicer.util.pip_install('torch==1.8.1 torchvision==0.9.1')
+                slicer.util.pip_install('torch==1.8.2 torchvision==0.9.2')
             else:
                 slicer.util.pip_install(
-                    'torch==1.8.1+cpu torchvision==0.9.1+cpu -f https://download.pytorch.org/whl/torch_stable.html')
-            slicer.util.pip_install('monai[nibabel,skimage,pillow,gdown,ignite,torchvision,tqdm,lmdb,psutil,tensorboard]==0.3')
-            logging.error("Requires MONAI version 0.3. Please restart Slicer.")
+                    'torch==1.8.2+cpu torchvision==0.9.2+cpu torchaudio===0.8.2 -f https://download.pytorch.org/whl/lts/1.8/torch_lts.html')
+            slicer.util.pip_install('monai[nibabel,skimage,pillow,gdown,ignite,torchvision,tqdm,lmdb,psutil,tensorboard,einops]==0.7')
+            logging.error("Requires MONAI version 0.7. Please restart Slicer.")
             return
 
         valveModel = HeartValveLib.getValveModel(heartValveNode)
@@ -2046,57 +2048,51 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         # Define transforms for image and segmentation
         xform = Compose([
-            LoadNiftid(keys),
-            AddChanneld(keys),
-            Spacingd(keys, 0.3, diagonal=True, mode='bilinear'),
-            Orientationd(keys, axcodes='RAS'),
+            LoadImaged('image'),
+            EnsureChannelFirstd('image'),
+            Spacingd('image', (0.5, 0.5, 0.5), diagonal=True, mode='bilinear'),
+            Orientationd('image', axcodes='RAS'),
             ScaleIntensityd("image"),
-            CropForegroundd(keys, source_key="image"),
-            ToTensord(keys)
+            CropForegroundd('image', source_key="image"),
+            EnsureTyped('image'),
         ])
+
+        post_tform = Compose(
+            [Activations(softmax=True),
+             AsDiscrete(argmax=True),
+             KeepLargestConnectedComponent(applied_labels=1)
+             ]
+        )
+
+        saver = SaveImage(
+            output_dir=path,
+            output_postfix="seg",
+            output_ext=".nii.gz",
+            output_dtype=np.uint8,
+        )
 
         # ds = CacheDataset(d, xform)
         ds = Dataset(d, xform)
         loader = DataLoader(ds, batch_size=1, shuffle=False, num_workers=0)
 
-        monai.utils.first(loader)
+        # monai.utils.first(loader)
 
-        device = torch.device('cpu')
+        device = torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
         # net = UNet(dimensions=3, in_channels=1, out_channels=1, channels=(16, 32, 64, 128, 256),
         #            strides=(2, 2, 2, 2), num_res_units=2, norm=Norm.BATCH).to(device)
 
-        modelPath = Path(__file__).parent.joinpath('Resources/model.md')
-        net = torch.load(str(modelPath))
+        modelPath = Path(__file__).parent.joinpath('Resources/model_07.md')
+        net = torch.load(str(modelPath), map_location=device)
 
-        evaluator = SupervisedEvaluator(
-            device=device,
-            val_data_loader=loader,
-            network=net,
-            inferer=SlidingWindowInferer((96, 96, 96), sw_batch_size=6),
-        )
+        net.eval()
+        with torch.no_grad():
+            for batch in loader:
+                out = sliding_window_inference(batch['image'].to(device), (96, 96, 96), 16, net)
+                out = post_tform(decollate_batch(out))
+                meta_dict = decollate_batch(batch["image_meta_dict"])
+                for o, m in zip(out, meta_dict):
+                    saver(o, m)
 
-        # modelPath = Path(__file__).parent.joinpath('Resources/model.pt')
-        # checkpoint = torch.load(str(modelPath), map_location=device)
-        # net.load_state_dict(checkpoint['net'])
-        #
-        # modelPath2 = modelPath.parent.joinpath('model.md')
-        # torch.save(net, str(modelPath2))
-        #
-        #
-        # checkpoint_loader = CheckpointLoader(str(modelPath), {'net': net}, map_location=device)
-        # checkpoint_loader.attach(evaluator)
-
-        prediction_saver = SegmentationSaver(
-            output_dir=path,
-            name="evaluator",
-            dtype=np.dtype('float64'),
-            batch_transform=lambda batch: batch["image_meta_dict"],
-            output_transform=lambda output: predict_segmentation(output['pred'])
-        )
-        prediction_saver.attach(evaluator)
-
-        # Running segmentation
-        evaluator.run()
 
         # Retrieve segmentations afterwards and include them into segmentation node
         segPath = path.joinpath(volumeNode.GetName()).joinpath('{}_seg.nii.gz'.format(volumeNode.GetName()))
