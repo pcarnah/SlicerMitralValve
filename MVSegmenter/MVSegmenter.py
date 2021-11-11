@@ -2034,11 +2034,12 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         path = Path(slicer.app.temporaryPath).joinpath('deepmv')
         path.mkdir(parents=True, exist_ok=True)
 
-
+        # Need to first write image here as nifti
         inputFilePath = path.joinpath('{}.nii'.format(volumeNode.GetName()))
         img = sitkUtils.PullVolumeFromSlicer(volumeNode)
         sitk.WriteImage(img, str(inputFilePath), True)
 
+        # Get image parameters
         outOrigin = img.GetOrigin()
         outDirections = img.GetDirection()
         inSpacing = np.array(img.GetSpacing())
@@ -2046,29 +2047,13 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         inSize = np.array(img.GetSize())
         outSize = np.ceil((inSize * inSpacing) / outSpacing).astype('int')
 
-        # resample = sitk.ResampleImageFilter()
-        # resample.SetOutputOrigin(outOrigin)
-        # resample.SetOutputDirection(outDirections)
-        # resample.SetOutputSpacing(outSpacing)
-        # resample.SetSize(outSize.tolist())
-        # resample.SetTransform(sitk.Transform())
-        # resample.SetInterpolator(sitk.sitkLinear)
-        # resample.SetOutputPixelType(img.GetPixelID())
-        #
-        # img_resampled = resample.Execute(img)
-        # np_img = sitk.GetArrayFromImage(img_resampled).swapaxes(0,2)
 
         monai.config.print_config()
         # print(str(path))
 
-        # Need to first write image here as nifti
-
         # Load and segment images
         images = [str(p.absolute()) for p in path.glob("*.nii")]
         d = [{"image": im} for im in images]
-        # meta_dict = {'spatial_shape': inSize, 'original_channel_dim': 'no_channel'}
-        # d = [{"image": np_img, 'image_meta_dict': meta_dict}]
-        keys = ("image")
 
         # Define transforms for image and segmentation
         xform = Compose([
@@ -2088,14 +2073,6 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
              ]
         )
 
-        # saver = SaveImage(
-        #     output_dir=path,
-        #     output_postfix="seg",
-        #     output_ext=".nii.gz",
-        #     output_dtype=np.uint8,
-        # )
-
-        # ds = CacheDataset(d, xform)
         ds = Dataset(d, xform)
         loader = DataLoader(ds, batch_size=1, shuffle=False, num_workers=0)
 
@@ -2103,24 +2080,18 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         device = torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
 
+        # Load model
         modelPath = Path(__file__).parent.joinpath('Resources/model_07.md')
         net = torch.load(str(modelPath), map_location=device)
 
+        # Evaluate model on image
         net.eval()
         with torch.no_grad():
             for batch in loader:
                 out = sliding_window_inference(batch['image'].to(device), (96, 96, 96), 16, net)
                 out = post_tform(decollate_batch(out))
-                # meta_dict = decollate_batch(batch["image_meta_dict"])
-                # for o, m in zip(out, meta_dict):
-                #     saver(o, m)
 
-
-        # Retrieve segmentations afterwards and include them into segmentation node
-        # segPath = path.joinpath(volumeNode.GetName()).joinpath('{}_seg.nii.gz'.format(volumeNode.GetName()))
-        # seg = sitk.ReadImage(str(segPath))
-        # self.pushITKImageToSegmentation(seg, outputSeg, 'Leaflet Segmentation_Saver')
-
+        # Retrieve segmentation and resample back to original image space using SITK
         x = out[0].detach().cpu().numpy().squeeze()
         segIm = sitk.GetImageFromArray(x.swapaxes(0,2))
         segIm.SetDirection(outDirections)
@@ -2136,7 +2107,8 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         resample.SetOutputPixelType(sitk.sitkFloat64)
         segIm = resample.Execute(segIm)
 
-        # self.pushITKImageToSegmentation(segIm, outputSeg, 'Leaflet Segmentation')
+        # Push Segmentation back to Slicer
+        # Binary threshold here as linear interpolation used in resampling
         self.pushITKImageToSegmentation(sitk.BinaryThreshold(segIm,0.5), outputSeg, 'Leaflet Segmentation')
 
         end = timer()

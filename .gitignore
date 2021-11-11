@@ -36,3 +36,4 @@
 *.user
 *.pyc
 .vscode
+.idea
