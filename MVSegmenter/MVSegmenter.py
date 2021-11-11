@@ -12,6 +12,7 @@ import numpy as np
 import math
 import logging
 import platform
+from timeit import default_timer as timer
 
 
 #
@@ -2019,6 +2020,8 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
             logging.error("Requires MONAI version 0.7. Please restart Slicer.")
             return
 
+        start = timer()
+
         valveModel = HeartValveLib.getValveModel(heartValveNode)
 
         if valveModel.getProbeToRasTransformNode():
@@ -2036,24 +2039,45 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         img = sitkUtils.PullVolumeFromSlicer(volumeNode)
         sitk.WriteImage(img, str(inputFilePath), True)
 
+        outOrigin = img.GetOrigin()
+        outDirections = img.GetDirection()
+        inSpacing = np.array(img.GetSpacing())
+        outSpacing = np.array([0.5, 0.5, 0.5])
+        inSize = np.array(img.GetSize())
+        outSize = np.ceil((inSize * inSpacing) / outSpacing).astype('int')
+
+        # resample = sitk.ResampleImageFilter()
+        # resample.SetOutputOrigin(outOrigin)
+        # resample.SetOutputDirection(outDirections)
+        # resample.SetOutputSpacing(outSpacing)
+        # resample.SetSize(outSize.tolist())
+        # resample.SetTransform(sitk.Transform())
+        # resample.SetInterpolator(sitk.sitkLinear)
+        # resample.SetOutputPixelType(img.GetPixelID())
+        #
+        # img_resampled = resample.Execute(img)
+        # np_img = sitk.GetArrayFromImage(img_resampled).swapaxes(0,2)
+
         monai.config.print_config()
-        print(str(path))
+        # print(str(path))
 
         # Need to first write image here as nifti
 
         # Load and segment images
         images = [str(p.absolute()) for p in path.glob("*.nii")]
         d = [{"image": im} for im in images]
+        # meta_dict = {'spatial_shape': inSize, 'original_channel_dim': 'no_channel'}
+        # d = [{"image": np_img, 'image_meta_dict': meta_dict}]
         keys = ("image")
 
         # Define transforms for image and segmentation
         xform = Compose([
             LoadImaged('image'),
             EnsureChannelFirstd('image'),
-            Spacingd('image', (0.5, 0.5, 0.5), diagonal=True, mode='bilinear'),
+            CropForegroundd('image', source_key="image"),
+            Spacingd('image', outSpacing, diagonal=True, mode='bilinear'),
             Orientationd('image', axcodes='RAS'),
             ScaleIntensityd("image"),
-            CropForegroundd('image', source_key="image"),
             EnsureTyped('image'),
         ])
 
@@ -2064,22 +2088,20 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
              ]
         )
 
-        saver = SaveImage(
-            output_dir=path,
-            output_postfix="seg",
-            output_ext=".nii.gz",
-            output_dtype=np.uint8,
-        )
+        # saver = SaveImage(
+        #     output_dir=path,
+        #     output_postfix="seg",
+        #     output_ext=".nii.gz",
+        #     output_dtype=np.uint8,
+        # )
 
         # ds = CacheDataset(d, xform)
         ds = Dataset(d, xform)
         loader = DataLoader(ds, batch_size=1, shuffle=False, num_workers=0)
 
-        # monai.utils.first(loader)
+        # x = monai.utils.first(loader)
 
         device = torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
-        # net = UNet(dimensions=3, in_channels=1, out_channels=1, channels=(16, 32, 64, 128, 256),
-        #            strides=(2, 2, 2, 2), num_res_units=2, norm=Norm.BATCH).to(device)
 
         modelPath = Path(__file__).parent.joinpath('Resources/model_07.md')
         net = torch.load(str(modelPath), map_location=device)
@@ -2089,15 +2111,36 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
             for batch in loader:
                 out = sliding_window_inference(batch['image'].to(device), (96, 96, 96), 16, net)
                 out = post_tform(decollate_batch(out))
-                meta_dict = decollate_batch(batch["image_meta_dict"])
-                for o, m in zip(out, meta_dict):
-                    saver(o, m)
+                # meta_dict = decollate_batch(batch["image_meta_dict"])
+                # for o, m in zip(out, meta_dict):
+                #     saver(o, m)
 
 
         # Retrieve segmentations afterwards and include them into segmentation node
-        segPath = path.joinpath(volumeNode.GetName()).joinpath('{}_seg.nii.gz'.format(volumeNode.GetName()))
-        seg = sitk.ReadImage(str(segPath))
-        self.pushITKImageToSegmentation(seg, outputSeg, 'Leaflet Segmentation')
+        # segPath = path.joinpath(volumeNode.GetName()).joinpath('{}_seg.nii.gz'.format(volumeNode.GetName()))
+        # seg = sitk.ReadImage(str(segPath))
+        # self.pushITKImageToSegmentation(seg, outputSeg, 'Leaflet Segmentation_Saver')
+
+        x = out[0].detach().cpu().numpy().squeeze()
+        segIm = sitk.GetImageFromArray(x.swapaxes(0,2))
+        segIm.SetDirection(outDirections)
+        origin = batch['foreground_start_coord'].detach().cpu().numpy().astype('int').tolist()[0]
+        segIm.SetOrigin(img.TransformIndexToPhysicalPoint(origin))
+        segIm.SetSpacing(outSpacing)
+        resample = sitk.ResampleImageFilter()
+        resample.SetOutputOrigin(outOrigin)
+        resample.SetOutputDirection(outDirections)
+        resample.SetOutputSpacing(inSpacing)
+        resample.SetSize(inSize.tolist())
+        resample.SetInterpolator(sitk.sitkLinear)
+        resample.SetOutputPixelType(sitk.sitkFloat64)
+        segIm = resample.Execute(segIm)
+
+        # self.pushITKImageToSegmentation(segIm, outputSeg, 'Leaflet Segmentation')
+        self.pushITKImageToSegmentation(sitk.BinaryThreshold(segIm,0.5), outputSeg, 'Leaflet Segmentation')
+
+        end = timer()
+        print('Segmented in {0:.3f}s'.format(end-start))
 
         # Cleanup temporary files
         shutil.rmtree(str(path))
