@@ -1989,7 +1989,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
             import shutil
         except ImportError as error:
             if platform.system() == 'Darwin':
-                slicer.util.pip_install('torch==1.8.2 torchvision==0.9.2')
+                slicer.util.pip_install('torch==1.8.1 torchvision==0.9.1')
             else:
                 slicer.util.pip_install('torch==1.8.2+cpu torchvision==0.9.2+cpu torchaudio===0.8.2 -f https://download.pytorch.org/whl/lts/1.8/torch_lts.html')
             slicer.util.pip_install('monai[nibabel,skimage,pillow,gdown,ignite,torchvision,tqdm,lmdb,psutil,tensorboard,einops]==0.7')
@@ -2012,7 +2012,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         if monai.__version__ != '0.7.0':
             if platform.system() == 'Darwin':
-                slicer.util.pip_install('torch==1.8.2 torchvision==0.9.2')
+                slicer.util.pip_install('torch==1.8.1 torchvision==0.9.1')
             else:
                 slicer.util.pip_install(
                     'torch==1.8.2+cpu torchvision==0.9.2+cpu torchaudio===0.8.2 -f https://download.pytorch.org/whl/lts/1.8/torch_lts.html')
