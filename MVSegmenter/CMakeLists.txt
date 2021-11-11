@@ -10,6 +10,7 @@ set(MODULE_PYTHON_RESOURCES
   Resources/Icons/${MODULE_NAME}.png
   Resources/moldBasePlate.stl
   Resources/model.md
+  Resources/model_07.md
   )
 
 #-----------------------------------------------------------------------------
