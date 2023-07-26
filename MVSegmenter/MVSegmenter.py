@@ -1,18 +1,18 @@
-import os
-import sys
-import unittest
 import importlib
-from pathlib import Path
-import vtk, qt, ctk, slicer
-import SimpleITK as sitk
-import sitkUtils
-from slicer.ScriptedLoadableModule import *
-import HeartValveLib
-import numpy as np
-import math
 import logging
-import platform
+import math
+from pathlib import Path
 from timeit import default_timer as timer
+
+import HeartValveLib
+import SimpleITK as sitk
+import ctk
+import numpy as np
+import qt
+import sitkUtils
+import slicer
+import vtk
+from slicer.ScriptedLoadableModule import *
 
 
 #
@@ -28,7 +28,7 @@ class MVSegmenter(ScriptedLoadableModule):
         ScriptedLoadableModule.__init__(self, parent)
         self.parent.title = "Mitral Valve Segmenter"
         self.parent.categories = ["Cardiac"]
-        self.parent.dependencies = []
+        self.parent.dependencies = ["ValveAnnulusAnalysis"]
         self.parent.contributors = [
             "Patrick Carnahan (Robarts Research Institute)"]
         self.parent.helpText = """
@@ -251,8 +251,8 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         #  Export Inner Surface Model
         #
         generateSurfaceMoldCollapsibleButton = ctk.ctkCollapsibleButton()
-        generateSurfaceMoldCollapsibleButton.text = "Generate Mold"
-        generateSurfaceMoldCollapsibleButton.collapsed = False
+        generateSurfaceMoldCollapsibleButton.text = "Mold Generation"
+        generateSurfaceMoldCollapsibleButton.collapsed = True
         self.layout.addWidget(generateSurfaceMoldCollapsibleButton)
 
         exportModelFormLayout = qt.QFormLayout(generateSurfaceMoldCollapsibleButton)
@@ -400,15 +400,17 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         self.generateMoldButton.enabled = self.heartValveSelector.currentNode() \
                                           and self.outputSegmentationSelector.currentNode() \
                                           and self.inputSelector.currentNode() \
-                                          and self.outputSegmentationSelector.currentNode().GetSegmentation().GetSegment('Leaflet Segmentation')
+                                          and self.outputSegmentationSelector.currentNode().GetSegmentation().GetSegment(
+            'Leaflet Segmentation')
 
         self.projectAnnulusButton.enabled = self.heartValveSelector.currentNode() and self.outputSegmentationSelector.currentNode() \
-                                        and self.outputSegmentationSelector.currentNode().GetSegmentation().GetSegment('Final_Mold')
+                                            and self.outputSegmentationSelector.currentNode().GetSegmentation().GetSegment(
+            'Mold_base')
 
         numberOfPoints = self.papillaryMarkupsNode.GetNumberOfDefinedControlPoints()
-        self.exportMoldButton.enabled = self.projectAnnulusButton.enabled and self.outputSegmentationSelector.currentNode().GetSegmentation().GetSegment('Projected_Annulus') \
-                                        and numberOfPoints >= 2
-        self.subtractAnnulusButton.enabled = self.projectAnnulusButton.enabled and self.outputSegmentationSelector.currentNode().GetSegmentation().GetSegment('Projected_Annulus')
+        self.exportMoldButton.enabled = self.projectAnnulusButton.enabled and numberOfPoints >= 2
+        self.subtractAnnulusButton.enabled = self.projectAnnulusButton.enabled and self.outputSegmentationSelector.currentNode().GetSegmentation().GetSegment(
+            'Projected_Annulus')
 
         self.addPapillary1Button.enabled = self.generateMoldButton.enabled and numberOfPoints < 2
         self.deleteLastPapillaryButton.enabled = numberOfPoints > 0
@@ -419,7 +421,8 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
             # This can be a long operation - indicate it to the user
             qt.QApplication.setOverrideCursor(qt.Qt.WaitCursor)
 
-            self.logic.runDeepMitral(self.heartValveSelector.currentNode(), self.inputSelector.currentNode(), self.outputSegmentationSelector.currentNode())
+            self.logic.runDeepMitral(self.heartValveSelector.currentNode(), self.inputSelector.currentNode(),
+                                     self.outputSegmentationSelector.currentNode())
             self.onSelect()
         finally:
             qt.QApplication.restoreOverrideCursor()
@@ -519,7 +522,6 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         # Enable redo button on undo
         self.redoButtonBP.enabled = True
 
-
     def onRedoButtonBP(self):
         # Will disable button when redo stack is empty
         self.redoButtonBP.enabled = self.logic.redoBPIteration(self.outputSegmentationSelector.currentNode())
@@ -540,7 +542,6 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
 
         # Enable undo button on redo
         self.undoButtonLeaflet.enabled = True
-
 
     def onGenerateSurfaceMarkups(self):
         success = self.logic.generateSurfaceMarkups(self.outputSegmentationSelector.currentNode(),
@@ -567,8 +568,8 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
             qt.QApplication.setOverrideCursor(qt.Qt.WaitCursor)
 
             self.logic.projectAnnulus(self.outputSegmentationSelector.currentNode(),
-                                           self.heartValveSelector.currentNode(),
-                                           float(self.annulusOffsetSlider.value))
+                                      self.heartValveSelector.currentNode(),
+                                      float(self.annulusOffsetSlider.value))
             self.onSelect()
 
         finally:
@@ -586,13 +587,12 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
         finally:
             qt.QApplication.restoreOverrideCursor()
 
-
     def onAddPapillaryButton(self):
-        self.papillaryMarkupsNode.SetAndObserveTransformNodeID(self.outputSegmentationSelector.currentNode().GetTransformNodeID())
+        self.papillaryMarkupsNode.SetAndObserveTransformNodeID(
+            self.outputSegmentationSelector.currentNode().GetTransformNodeID())
         slicer.modules.markups.logic().SetActiveListID(self.papillaryMarkupsNode)
         slicer.app.applicationLogic().GetInteractionNode().SetPlaceModePersistence(1)
         slicer.app.applicationLogic().GetInteractionNode().SetCurrentInteractionMode(1)
-
 
     def onDeleteLastPapillaryButton(self):
         numberOfPoints = self.papillaryMarkupsNode.GetNumberOfDefinedControlPoints()
@@ -628,6 +628,7 @@ class MVSegmenterWidget(ScriptedLoadableModuleWidget):
     def onGenerateBasePlate(self):
         return
 
+
 #
 # MVSegmenterLogic
 #
@@ -655,7 +656,6 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         self._redoLeafletLevelSetStack = []
 
         self.moldBasePlate = None
-
 
     def initBPSeg(self, inputVolume, heartValveNode, outputSeg):
         """
@@ -977,7 +977,6 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         else:
             return False
 
-
     def redoLeafletIteration(self, outputSeg):
         """
         Performs the redo operation on the leaflet level set
@@ -1006,7 +1005,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         else:
             return False
 
-    def updateBPLevelSetFromSegmentation(self, segNode, segmentId = 'BP Segmentation'):
+    def updateBPLevelSetFromSegmentation(self, segNode, segmentId='BP Segmentation'):
         """
         Retrieves the new level set from the Segmentation node and update the blood pool level set for subsequent operations.
         :param segNode: Segmentation node used to store output
@@ -1022,7 +1021,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         self.updateBPLevelSet(levelSet)
 
-    def updateLeafletLevelSetFromSegmentation(self, segNode, segmentId = 'Leaflet Segmentation'):
+    def updateLeafletLevelSetFromSegmentation(self, segNode, segmentId='Leaflet Segmentation'):
         """
         Retrieves the new level set from the Segmentation node and update the leaflet level set for subsequent operations.
         :param segNode: Segmentation node used to store output
@@ -1058,10 +1057,10 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         # Check if binary label maps match
         stat = sitk.StatisticsImageFilter()
         stat.Execute(sitk.NotEqual(im, im2))
-        max = stat.GetMaximum()
+        maximum = stat.GetMaximum()
 
         # Level sets are equal if max of pixelwise not is 0
-        return max == 0
+        return maximum == 0
 
     def pushITKImageToSegmentation(self, img, segmentationNode, segmentId='Leaflet Segmentation'):
         """
@@ -1080,7 +1079,6 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         if segmentationNode.GetSegmentation().GetConversionParameter('Smoothing factor') != '0.5':
             segmentationNode.GetSegmentation().SetConversionParameter('Smoothing factor', '0.5')
 
-
         # Create temporary label map node
         tempNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLabelMapVolumeNode', 'temp_labelmap')
         tempNode.SetAndObserveTransformNodeID(segmentationNode.GetTransformNodeID())
@@ -1097,7 +1095,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         slicer.mrmlScene.RemoveNode(tempNode)
 
-    def pullITKImageFromSegmentation(self, segmentationNode, segmentId, refNode = None):
+    def pullITKImageFromSegmentation(self, segmentationNode, segmentId, refNode=None):
         """
         Retrieves an itk image from a Segmentation MRML node
         :param segmentationNode: The output segmentation node
@@ -1133,7 +1131,6 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         slicer.mrmlScene.RemoveNode(tempNode)
 
         return itkImg
-
 
     def rasToIJK(self, point, volume):
         """
@@ -1261,8 +1258,6 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
             model)
         segNode.GetSegmentation().AddSegment(segment, name)
 
-
-
     def generateSurfaceMold(self, segNode, heartValveNode, depth, volume):
         """
         Generate the complete surface mold from the segmentation. Clips the bottom of the mold to a specified depth.
@@ -1315,7 +1310,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         mold = vtk.vtkPolyData()
         mold.DeepCopy(normAuto.GetOutput())
 
-        self.pushModelToSegmentation(segNode, mold, 'Final_Mold')
+        self.pushModelToSegmentation(segNode, mold, 'Mold_base')
 
         # Remake closed surface representation after adding mold (makes it generated model from labelmap)
         segNode.RemoveClosedSurfaceRepresentation()
@@ -1329,7 +1324,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         segmentEditorWidget.setMRMLSegmentEditorNode(segmentEditorNode)
         segmentEditorWidget.setSegmentationNode(segNode)
         segmentEditorWidget.setMasterVolumeNode(volume)
-        segmentEditorWidget.setCurrentSegmentID('Final_Mold')
+        segmentEditorWidget.setCurrentSegmentID('Mold_base')
 
         # Smoothing
         segmentEditorWidget.setActiveEffectByName("Smoothing")
@@ -1342,7 +1337,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         segmentEditorWidget = None
         slicer.mrmlScene.RemoveNode(segmentEditorNode)
 
-    def projectAnnulus(self, segNode, heartValveNode, offset = 0):
+    def projectAnnulus(self, segNode, heartValveNode, offset=0):
         """
         Project the annulus onto the mold model using the optional offset
         :param segNode: Segmentation node
@@ -1358,11 +1353,10 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         valveModel = HeartValveLib.getValveModel(heartValveNode)
 
         # Get segmentation closed surface representations
-        segMold = segNode.GetClosedSurfaceInternalRepresentation('Final_Mold')
+        segMold = segNode.GetClosedSurfaceInternalRepresentation('Mold_base')
         if not segMold:
             logging.debug("projectAnnulus: Missing mold segmentation")
             return None
-
 
         # Get the annulus projected onto the proximal surface
         projectedAnnulus, stiffener = self.generateProjectedAnnulus(segMold, valveModel, offset)
@@ -1409,7 +1403,8 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
             logging.debug("subtractAnnulusSegmentation failed: Missing parameter")
             return None
 
-        if not segNode.GetSegmentation().GetSegment('Projected_Annulus') or not segNode.GetSegmentation().GetSegment('Final_Mold'):
+        if not segNode.GetSegmentation().GetSegment('Projected_Annulus') or not segNode.GetSegmentation().GetSegment(
+                'Mold_base'):
             logging.debug("subtractAnnulusSegmentation failed: Missing segment")
 
         # Create segment editor to get access to effects
@@ -1420,7 +1415,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         segmentEditorWidget.setMRMLSegmentEditorNode(segmentEditorNode)
         segmentEditorWidget.setSegmentationNode(segNode)
         segmentEditorWidget.setMasterVolumeNode(volume)
-        segmentEditorWidget.setCurrentSegmentID('Final_Mold')
+        segmentEditorWidget.setCurrentSegmentID('Mold_base')
 
         # Subtraction
         segmentEditorWidget.setActiveEffectByName("Logical operators")
@@ -1449,12 +1444,12 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         """
 
         # Get segmentation closed surface representations
-        segMold = segNode.GetClosedSurfaceInternalRepresentation('Final_Mold')
+        segMold = segNode.GetClosedSurfaceInternalRepresentation('Mold_base')
         annulusMold = segNode.GetClosedSurfaceInternalRepresentation('Projected_Annulus')
         stiffener = segNode.GetClosedSurfaceInternalRepresentation('Stiffener_Surface')
-        if not segMold or not annulusMold or not stiffener:
-            logging.debug("exportSurfaceMold failed: Missing mold segmentation")
-            return
+        # if not segMold or not annulusMold or not stiffener:
+        #     logging.debug("exportSurfaceMold failed: Missing mold segmentation")
+        #     return
 
         # Set default polydata extension to stl
         defaultModelStorageNode = slicer.vtkMRMLModelStorageNode()
@@ -1499,33 +1494,36 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         normAuto.SetInputConnection(holeFill.GetOutputPort())
         normAuto.Update()
 
-
         # Export closed surface meshes to model nodes
         moldModel = vtk.vtkPolyData()
         moldModel.DeepCopy(normAuto.GetOutput())
 
-        self.addOrUpdateModel(moldModel, 'Final_Mold_Model', segNode.GetTransformNodeID(), segNode.GetSegmentation().GetSegment('Final_Mold').GetColor())
+        self.addOrUpdateModel(moldModel, 'Mold_base_Model', segNode.GetTransformNodeID(),
+                              segNode.GetSegmentation().GetSegment('Mold_base').GetColor())
 
-        annulusModel = vtk.vtkPolyData()
-        annulusModel.DeepCopy(annulusMold)
-        self.addOrUpdateModel(annulusModel, 'Projected_Annulus_Model', segNode.GetTransformNodeID(), segNode.GetSegmentation().GetSegment('Projected_Annulus').GetColor())
+        if annulusMold:
+            annulusModel = vtk.vtkPolyData()
+            annulusModel.DeepCopy(annulusMold)
+            self.addOrUpdateModel(annulusModel, 'Projected_Annulus_Model', segNode.GetTransformNodeID(),
+                                  segNode.GetSegmentation().GetSegment('Projected_Annulus').GetColor())
 
-        # Decimate stiffener ring to 98%
-        decimate = vtk.vtkDecimatePro()
-        decimate.SetTargetReduction(0.98)
-        decimate.SetInputData(stiffener)
-        decimate.Update()
+        if stiffener:
+            # Decimate stiffener ring to 98%
+            decimate = vtk.vtkDecimatePro()
+            decimate.SetTargetReduction(0.98)
+            decimate.SetInputData(stiffener)
+            decimate.Update()
 
-        stiffenerModel = vtk.vtkPolyData()
-        stiffenerModel.DeepCopy(decimate.GetOutput())
-        self.addOrUpdateModel(stiffenerModel, 'Stiffener_Model', segNode.GetTransformNodeID(),
-                              segNode.GetSegmentation().GetSegment('Stiffener_Surface').GetColor())
+            stiffenerModel = vtk.vtkPolyData()
+            stiffenerModel.DeepCopy(decimate.GetOutput())
+            self.addOrUpdateModel(stiffenerModel, 'Stiffener_Model', segNode.GetTransformNodeID(),
+                                  segNode.GetSegmentation().GetSegment('Stiffener_Surface').GetColor())
 
         papillaryModel = vtk.vtkPolyData()
         papAppend = vtk.vtkAppendPolyData()
 
         for i in range(papillaryMarkupsNode.GetNumberOfDefinedControlPoints()):
-            p = np.array([0,0,0])
+            p = np.array([0, 0, 0])
             papillaryMarkupsNode.GetNthControlPointPosition(i, p)
 
             sphereSource = vtk.vtkSphereSource()
@@ -1539,8 +1537,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         self.addOrUpdateModel(papillaryModel, 'Papillary_Model', segNode.GetTransformNodeID())
 
-
-    def extractInnerSurfaceModel(self, segNode, valveModel, segName = 'Leaflet Segmentation'):
+    def extractInnerSurfaceModel(self, segNode, valveModel, segName='Leaflet Segmentation'):
         """
         Extracts the inner surface (proximal to image probe) from the segmentation. Uses surface normals of leaflet
         segmentation along with the annulus normal and blood pool definitions to determine points on inside of segmentaion.
@@ -1560,7 +1557,8 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         annulusPlane = valveModel.getAnnulusContourPlane()
 
         segNode.CreateClosedSurfaceRepresentation()
-        leafletModel = segNode.GetClosedSurfaceInternalRepresentation(segNode.GetSegmentation().GetSegmentIdBySegmentName(segName))
+        leafletModel = segNode.GetClosedSurfaceInternalRepresentation(
+            segNode.GetSegmentation().GetSegmentIdBySegmentName(segName))
         if leafletModel is None:
             logging.debug("extractInnerSurfaceModel failed: Missing segmentation")
             return None
@@ -1609,7 +1607,6 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         locator.SetDataSet(tubeFilter.GetOutput())
         locator.BuildLocator()
 
-
         # Loop over remaining points and build scalar array using different techniques for top and bottom half
         a0 = np.zeros(3)
         p = annulusPlane[0] + annulusPlane[1] * 2
@@ -1630,9 +1627,9 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
                 # If only 1 intersection point, line does not cross through leaflet model as the line always intersects at a0
                 if points.GetNumberOfPoints() == 1:
-                    scalars.SetValue(i, 10)     # Set scalar to large value so point will be kept
+                    scalars.SetValue(i, 10)  # Set scalar to large value so point will be kept
                 else:
-                    scalars.SetValue(i, -10)    # Set scalar to small value so point will be discarded
+                    scalars.SetValue(i, -10)  # Set scalar to small value so point will be discarded
             else:
                 # Point is below annulus plane
                 # Get the closest point on tube surface, find angle between 2 normals in radians
@@ -1640,7 +1637,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
                 v = np.array(tubeNormals.GetTuple(closestPoint))
                 n = np.array(normals.GetTuple(i))
                 angle = math.acos(np.dot(n, v) / np.linalg.norm(n) / np.linalg.norm(v))
-                scalars.SetValue(i, angle)      # Set scalar to angle
+                scalars.SetValue(i, angle)  # Set scalar to angle
 
         # Scalars now angles in radians that we can threshold
         clipped.GetPointData().SetScalars(scalars)
@@ -1677,8 +1674,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         innerModel.DeepCopy(normClean.GetOutput())
         return innerModel
 
-
-    def generateProjectedAnnulus(self, extractedLeaflet, valveModel, offset = 0):
+    def generateProjectedAnnulus(self, extractedLeaflet, valveModel, offset=0):
         """
         Projects the annulus definition inwards onto the surface model for mold
         :param extractedLeaflet: vtkPolyData surface model
@@ -1746,7 +1742,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         # Create tube from spline fitted projected annulus
         tubeFilter = vtk.vtkTubeFilter()
-        tubeFilter.SetRadius(1) # Radius of 1 determined through trial and error on printed models
+        tubeFilter.SetRadius(1)  # Radius of 1 determined through trial and error on printed models
         tubeFilter.SetNumberOfSides(20)
         tubeFilter.CappingOff()
         tubeFilter.SetInputConnection(strip.GetOutputPort())
@@ -1947,7 +1943,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         return topMold, bottomMold
 
-    def addOrUpdateModel(self, model, name, tformId = None, color = None):
+    def addOrUpdateModel(self, model, name, tformId=None, color=None):
         """
         Add or update a Model node
         :param model: vtkPolyData model
@@ -1969,55 +1965,33 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         if color:
             node.GetDisplayNode().SetColor(color)
 
-
     def runDeepMitral(self, heartValveNode, volumeNode, outputSeg):
         try:
             import monai
             import torch
-            from monai.data import Dataset, DataLoader, list_data_collate, decollate_batch
+            from monai.data import Dataset, DataLoader, decollate_batch
             from monai.inferers import sliding_window_inference
             from monai.transforms import (Compose, LoadImaged, Orientationd, ScaleIntensityd,
-                                          EnsureChannelFirstd, EnsureTyped, CropForegroundd, Spacingd, RandSpatialCropSamplesd,
-                                          RandAffined, RandCropByPosNegLabeld, AsDiscreted, Rand3DElasticd,
-                                          LabelToContour, Activations, AsDiscrete, KeepLargestConnectedComponent, SaveImage)
-            from monai.handlers import (CheckpointLoader, SegmentationSaver)
-            from monai.networks.layers import Norm
-            from monai.networks import predict_segmentation
-            from monai.networks.nets import UNet
-            from monai.inferers import SlidingWindowInferer
-            from monai.engines import SupervisedEvaluator
+                                          EnsureChannelFirstd, EnsureTyped, CropForegroundd, Spacingd, AsDiscreted,
+                                          Activations, AsDiscrete, KeepLargestConnectedComponent, SaveImage)
             import shutil
         except ImportError as error:
-            if platform.system() == 'Darwin':
-                slicer.util.pip_install('torch==1.8.1 torchvision==0.9.1')
-            else:
-                slicer.util.pip_install('torch==1.8.2+cpu torchvision==0.9.2+cpu torchaudio===0.8.2 -f https://download.pytorch.org/whl/lts/1.8/torch_lts.html')
-            slicer.util.pip_install('monai[nibabel,skimage,pillow,gdown,ignite,torchvision,tqdm,lmdb,psutil,tensorboard,einops]==0.7')
+            slicer.util.pip_install('torch==2.0.1 torchvision==0.15.2 --index-url https://download.pytorch.org/whl/cpu')
+            slicer.util.pip_install('monai[nibabel,skimage,pillow,gdown,tqdm,psutil,einops]==1.2')
             importlib.invalidate_caches()
             import monai
             import torch
-            from monai.data import Dataset, DataLoader, list_data_collate, decollate_batch
+            from monai.data import Dataset, DataLoader, decollate_batch
             from monai.inferers import sliding_window_inference
             from monai.transforms import (Compose, LoadImaged, Orientationd, ScaleIntensityd,
-                                          EnsureChannelFirstd, EnsureTyped, CropForegroundd, Spacingd, RandSpatialCropSamplesd,
-                                          RandAffined, RandCropByPosNegLabeld, AsDiscreted, Rand3DElasticd,
-                                          LabelToContour, Activations, AsDiscrete, KeepLargestConnectedComponent,SaveImage)
-            from monai.handlers import (CheckpointLoader, SegmentationSaver)
-            from monai.networks.layers import Norm
-            from monai.networks import predict_segmentation
-            from monai.networks.nets import UNet
-            from monai.inferers import SlidingWindowInferer
-            from monai.engines import SupervisedEvaluator
+                                          EnsureChannelFirstd, EnsureTyped, CropForegroundd, Spacingd, AsDiscreted,
+                                          Activations, AsDiscrete, KeepLargestConnectedComponent, SaveImage)
             import shutil
 
-        if monai.__version__ != '0.7.0':
-            if platform.system() == 'Darwin':
-                slicer.util.pip_install('torch==1.8.1 torchvision==0.9.1')
-            else:
-                slicer.util.pip_install(
-                    'torch==1.8.2+cpu torchvision==0.9.2+cpu torchaudio===0.8.2 -f https://download.pytorch.org/whl/lts/1.8/torch_lts.html')
-            slicer.util.pip_install('monai[nibabel,skimage,pillow,gdown,ignite,torchvision,tqdm,lmdb,psutil,tensorboard,einops]==0.7')
-            logging.error("Requires MONAI version 0.7. Please restart Slicer.")
+        if monai.__version__ != '1.2.0':
+            slicer.util.pip_install('torch==2.0.1 torchvision==0.15.2 --index-url https://download.pytorch.org/whl/cpu')
+            slicer.util.pip_install('monai[nibabel,skimage,pillow,gdown,tqdm,psutil,einops]==1.2')
+            logging.error("Requires MONAI version 1.2. Please restart Slicer.")
             return
 
         start = timer()
@@ -2043,12 +2017,11 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
         outOrigin = img.GetOrigin()
         outDirections = img.GetDirection()
         inSpacing = np.array(img.GetSpacing())
-        outSpacing = np.array([0.5, 0.5, 0.5])
+        outSpacing = np.array([0.3, 0.3, 0.3])
         inSize = np.array(img.GetSize())
         outSize = np.ceil((inSize * inSpacing) / outSpacing).astype('int')
 
-
-        monai.config.print_config()
+        # monai.config.print_config()
         # print(str(path))
 
         # Load and segment images
@@ -2057,7 +2030,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         # Define transforms for image and segmentation
         xform = Compose([
-            LoadImaged('image'),
+            LoadImaged('image', image_only=False),
             EnsureChannelFirstd('image'),
             CropForegroundd('image', source_key="image"),
             Spacingd('image', outSpacing, diagonal=True, mode='bilinear'),
@@ -2078,10 +2051,15 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         # x = monai.utils.first(loader)
 
-        device = torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
+        if torch.backends.mps.is_available():
+            device = torch.device("mps")
+        elif torch.cuda.is_available():
+            device = torch.device('cuda:0')
+        else:
+            device = torch.device('cpu')
 
         # Load model
-        modelPath = Path(__file__).parent.joinpath('Resources/model_07.md')
+        modelPath = Path(__file__).parent.joinpath('Resources/model_11_large.md')
         net = torch.load(str(modelPath), map_location=device)
 
         # Evaluate model on image
@@ -2093,7 +2071,7 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         # Retrieve segmentation and resample back to original image space using SITK
         x = out[0].detach().cpu().numpy().squeeze()
-        segIm = sitk.GetImageFromArray(x.swapaxes(0,2))
+        segIm = sitk.GetImageFromArray(x.swapaxes(0, 2))
         segIm.SetDirection(outDirections)
         origin = batch['foreground_start_coord'].detach().cpu().numpy().astype('int').tolist()[0]
         segIm.SetOrigin(img.TransformIndexToPhysicalPoint(origin))
@@ -2109,15 +2087,13 @@ class MVSegmenterLogic(ScriptedLoadableModuleLogic):
 
         # Push Segmentation back to Slicer
         # Binary threshold here as linear interpolation used in resampling
-        self.pushITKImageToSegmentation(sitk.BinaryThreshold(segIm,0.5), outputSeg, 'Leaflet Segmentation')
+        self.pushITKImageToSegmentation(sitk.BinaryThreshold(segIm, 0.5), outputSeg, 'Leaflet Segmentation')
 
         end = timer()
-        print('Segmented in {0:.3f}s'.format(end-start))
+        print('Segmented in {0:.3f}s'.format(end - start))
 
         # Cleanup temporary files
         shutil.rmtree(str(path))
-
-
 
 
 class MVSegmenterTest(ScriptedLoadableModuleTest):

@@ -11,6 +11,7 @@ set(MODULE_PYTHON_RESOURCES
   Resources/moldBasePlate.stl
   Resources/model.md
   Resources/model_07.md
+  Resources/model_11_large.md
   )
 
 #-----------------------------------------------------------------------------
